@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Trash2, Pencil, GripVertical, Plus, Check, Clock, HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { adminTheme } from "@/theme/adminTheme";
@@ -7,88 +7,26 @@ import { adminTheme } from "@/theme/adminTheme";
 // Options / constants used only by the Structure step
 // ---------------------------------------------------------------------------
 
-// sections.name — predefined section catalog
-export const SECTION_NAME_OPTIONS = [
-  { value: "", label: "Select Section" },
-  { value: "Aptitude", label: "Aptitude" },
-];
-
-// subsections.name — predefined subsection catalog
-export const SUBSECTION_NAME_OPTIONS = [
-  { value: "", label: "Select Subsection" },
-  { value: "Logical Reasoning", label: "Logical Reasoning" },
-  { value: "Numerical Aptitude", label: "Numerical Aptitude" },
-  { value: "Verbal Ability", label: "Verbal Ability" },
-  { value: "Spatial Ability", label: "Spatial Ability" },
-  { value: "Interest Inventory", label: "Interest Inventory" },
-  { value: "Personality Assessment", label: "Personality Assessment" },
-  { value: "Custom Section", label: "Custom Section" },
-];
-
-// dimensions (referenced by subsections.dimension_id)
-export const DIMENSION_OPTIONS = [
-  { value: "", label: "No Primary Dimension" },
-  { value: "LOGICAL", label: "Logical Reasoning" },
-  { value: "NUMERICAL", label: "Numerical Ability" },
-  { value: "VERBAL", label: "Verbal Ability" },
-  { value: "SPATIAL", label: "Spatial Ability" },
-  { value: "REALISTIC", label: "Realistic (Interest)" },
-  { value: "INVESTIGATIVE", label: "Investigative (Interest)" },
-  { value: "ARTISTIC", label: "Artistic (Interest)" },
-  { value: "SOCIAL", label: "Social (Interest)" },
-  { value: "ENTERPRISING", label: "Enterprising (Interest)" },
-  { value: "CONVENTIONAL", label: "Conventional (Interest)" },
-  { value: "OPENNESS", label: "Openness (Personality)" },
-  { value: "CONSCIENTIOUSNESS", label: "Conscientiousness (Personality)" },
-  { value: "EXTRAVERSION", label: "Extraversion (Personality)" },
-  { value: "AGREEABLENESS", label: "Agreeableness (Personality)" },
-  { value: "NEUROTICISM", label: "Neuroticism (Personality)" },
-];
-
-export const DIMENSION_LABELS = DIMENSION_OPTIONS.reduce((acc, option) => {
-  if (option.value) acc[option.value] = option.label;
-  return acc;
-}, {});
+// Section and subsection name catalogs both come exclusively from their
+// respective APIs (GET /asse/sections/ and GET /asse/subsections/). The
+// fetches themselves are dispatched once from CreateAssessment.jsx on
+// mount (along with grades) — this component is now purely presentational
+// and receives `sectionOptions` / `subsectionOptions` etc. as props. There
+// is deliberately no local fallback list for either — if the API call
+// hasn't returned yet, the dropdown is just empty until it does.
 
 // sections + nested subsections (Step 4 default/seed state)
+// NOTE: previously seeded with sample "Logical Reasoning" / "Numerical
+// Aptitude" dummy content. Now starts with a single blank section so users
+// build the structure from scratch instead of having to clear sample data.
 export const INITIAL_SECTIONS = [
   {
     id: "section-1",
-    name: "Logical Reasoning",
-    sectionCode: "LOGICAL",
+      dbId: null,
+    name: "",
+    sectionCode: "",
     description: "",
     instructions: "",
-    timeLimitMinutes: 20,
-    isMandatory: true,
-    randomizeQuestions: false,
-    subsections: [
-      {
-        id: "section-1-sub-1",
-        name: "Pattern Recognition",
-        subsectionCode: "PATTERN",
-        dimensionId: "LOGICAL",
-        questionLimit: 10,
-        description: "Focuses on visual sequences and pattern completion.",
-        instructions: "",
-      },
-      {
-        id: "section-1-sub-2",
-        name: "Syllogisms & Deduction",
-        subsectionCode: "SYLLOGISM",
-        dimensionId: "LOGICAL",
-        questionLimit: 5,
-        description: "Analytical thinking and logical inference.",
-        instructions: "",
-      },
-    ],
-  },
-  {
-    id: "section-2",
-    name: "Numerical Aptitude",
-    sectionCode: "NUMERICAL",
-    description: "",
-    instructions: "",
-    timeLimitMinutes: 25,
     isMandatory: true,
     randomizeQuestions: false,
     subsections: [],
@@ -103,6 +41,10 @@ export const INITIAL_SECTIONS = [
 // wizard steps in CreateAssessment.jsx), delete this block and import them
 // from there instead. They're duplicated here only so this file works
 // standalone.
+//
+// All four input atoms accept a `disabled` prop so individual fields on
+// this step can be locked while leaving the Section/Subsection name
+// dropdowns editable.
 // ---------------------------------------------------------------------------
 
 const FieldLabel = ({ children, required }) => (
@@ -136,19 +78,21 @@ const TextInput = ({ id, value, onChange, placeholder, disabled, required = fals
   </div>
 );
 
-const SelectInput = ({ id, value, onChange, options, required = false, error }) => (
+const SelectInput = ({ id, value, onChange, options, required = false, error, disabled = false }) => (
   <div>
     <select
       id={id}
       value={value}
       onChange={onChange}
       required={required}
+      disabled={disabled}
       className={cn(
         "h-11 w-full text-sm",
         adminTheme.radius.md,
         adminTheme.border.default,
         "border bg-white px-3 text-slate-900",
         "focus:outline-none focus:ring-2 focus:ring-slate-900/10",
+        disabled && "cursor-not-allowed bg-slate-50 text-slate-400",
         error && "border-red-300 focus:ring-red-200"
       )}
     >
@@ -162,7 +106,7 @@ const SelectInput = ({ id, value, onChange, options, required = false, error }) 
   </div>
 );
 
-const NumberInput = ({ id, value, onChange, icon: Icon, suffix, error }) => (
+const NumberInput = ({ id, value, onChange, icon: Icon, suffix, error, disabled = false }) => (
   <div>
     <div className="relative">
       {Icon && (
@@ -173,6 +117,7 @@ const NumberInput = ({ id, value, onChange, icon: Icon, suffix, error }) => (
         type="number"
         value={value}
         onChange={onChange}
+        disabled={disabled}
         className={cn(
           "h-11 w-full text-sm",
           adminTheme.radius.md,
@@ -181,6 +126,7 @@ const NumberInput = ({ id, value, onChange, icon: Icon, suffix, error }) => (
           Icon ? "pl-9" : "pl-3",
           suffix ? "pr-9" : "pr-3",
           "focus:outline-none focus:ring-2 focus:ring-slate-900/10",
+          disabled && "cursor-not-allowed bg-slate-50 text-slate-400",
           error && "border-red-300 focus:ring-red-200"
         )}
       />
@@ -194,14 +140,18 @@ const NumberInput = ({ id, value, onChange, icon: Icon, suffix, error }) => (
   </div>
 );
 
-const Checkbox = ({ id, checked, onChange, title, description }) => (
-  <label htmlFor={id} className="flex cursor-pointer items-start gap-3">
+const Checkbox = ({ id, checked, onChange, title, description, disabled = false }) => (
+  <label
+    htmlFor={id}
+    className={cn("flex items-start gap-3", disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer")}
+  >
     <input
       id={id}
       type="checkbox"
       checked={checked}
       onChange={onChange}
-      className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-slate-900 focus:ring-slate-900/20"
+      disabled={disabled}
+      className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-slate-900 focus:ring-slate-900/20 disabled:cursor-not-allowed"
     />
     <span>
       <span className="block text-sm font-medium text-slate-900">{title}</span>
@@ -214,8 +164,57 @@ const Checkbox = ({ id, checked, onChange, title, description }) => (
 // Subsection row
 // ---------------------------------------------------------------------------
 
-const SubsectionRow = ({ subsection, isNew, onFieldChange, onRequestRemove }) => {
+const SubsectionRow = ({
+  subsection,
+  isNew,
+  subsectionOptions,
+  subsectionCodeByName,
+    subsectionIdByName, 
+  subsectionDimensionByName,
+  subsectionDescriptionByName,
+  subsectionInstructionsByName,
+  subsectionTimeLimitByName,
+  subsectionQuestionLimitByName,
+  subsectionRandomizeByName,
+  isLoadingSubsections,
+  onFieldChange,
+  onRequestRemove,
+}) => {
   const [isEditing, setIsEditing] = useState(isNew);
+
+  // Picking a subsection name from the API-backed list fills in every
+  // read-only detail field from that subsection's master record — code,
+  // dimension, description, instructions, time limit, question limit, and
+  // randomize flag. The user can't hand-edit any of these (they're
+  // disabled), so this is the only way they get populated.
+  const handleSubsectionNameChange = (selectedName) => {
+    onFieldChange(subsection.id, "name", selectedName);
+
+    // Real backend id — this is what actually goes into the publish payload.
+    const matchedId = subsectionIdByName?.[selectedName];
+    onFieldChange(subsection.id, "dbId", matchedId != null ? matchedId : null);
+
+    const matchedCode = subsectionCodeByName?.[selectedName];
+    if (matchedCode != null) onFieldChange(subsection.id, "subsectionCode", matchedCode);
+
+    const matchedDimension = subsectionDimensionByName?.[selectedName];
+    if (matchedDimension != null) onFieldChange(subsection.id, "dimensionId", matchedDimension);
+
+    const matchedDescription = subsectionDescriptionByName?.[selectedName];
+    if (matchedDescription != null) onFieldChange(subsection.id, "description", matchedDescription);
+
+    const matchedInstructions = subsectionInstructionsByName?.[selectedName];
+    if (matchedInstructions != null) onFieldChange(subsection.id, "instructions", matchedInstructions);
+
+    const matchedTimeLimit = subsectionTimeLimitByName?.[selectedName];
+    if (matchedTimeLimit != null) onFieldChange(subsection.id, "timeLimitMinutes", matchedTimeLimit);
+
+    const matchedQuestionLimit = subsectionQuestionLimitByName?.[selectedName];
+    if (matchedQuestionLimit != null) onFieldChange(subsection.id, "questionLimit", matchedQuestionLimit);
+
+    const matchedRandomize = subsectionRandomizeByName?.[selectedName];
+    if (matchedRandomize != null) onFieldChange(subsection.id, "randomizeQuestions", matchedRandomize);
+  };
 
   return (
     <div
@@ -234,9 +233,10 @@ const SubsectionRow = ({ subsection, isNew, onFieldChange, onRequestRemove }) =>
               <SelectInput
                 id={`${subsection.id}-name`}
                 value={subsection.name}
-                onChange={(e) => onFieldChange(subsection.id, "name", e.target.value)}
-                options={SUBSECTION_NAME_OPTIONS}
+                onChange={(e) => handleSubsectionNameChange(e.target.value)}
+                options={subsectionOptions}
               />
+              {isLoadingSubsections && <p className="mt-1 text-xs text-slate-400">Loading subsections…</p>}
             </div>
             <div className="sm:col-span-3">
               <FieldLabel>Subsection Code</FieldLabel>
@@ -245,15 +245,18 @@ const SubsectionRow = ({ subsection, isNew, onFieldChange, onRequestRemove }) =>
                 value={subsection.subsectionCode}
                 onChange={(e) => onFieldChange(subsection.id, "subsectionCode", e.target.value)}
                 placeholder="PATTERN"
+                disabled
               />
             </div>
             <div className="sm:col-span-4">
-              <FieldLabel>Primary Dimension</FieldLabel>
-              <SelectInput
-                id={`${subsection.id}-dimension`}
-                value={subsection.dimensionId}
-                onChange={(e) => onFieldChange(subsection.id, "dimensionId", e.target.value)}
-                options={DIMENSION_OPTIONS}
+              <FieldLabel>Time Limit</FieldLabel>
+              <NumberInput
+                id={`${subsection.id}-timeLimit`}
+                icon={Clock}
+                suffix="min"
+                value={subsection.timeLimitMinutes ?? 0}
+                onChange={(e) => onFieldChange(subsection.id, "timeLimitMinutes", e.target.value)}
+                disabled
               />
             </div>
           </div>
@@ -263,6 +266,7 @@ const SubsectionRow = ({ subsection, isNew, onFieldChange, onRequestRemove }) =>
               id={`${subsection.id}-limit`}
               value={subsection.questionLimit}
               onChange={(e) => onFieldChange(subsection.id, "questionLimit", e.target.value)}
+              disabled
             />
           </div>
           <div>
@@ -272,6 +276,7 @@ const SubsectionRow = ({ subsection, isNew, onFieldChange, onRequestRemove }) =>
               value={subsection.description}
               onChange={(e) => onFieldChange(subsection.id, "description", e.target.value)}
               placeholder="Short description"
+              disabled
             />
           </div>
           <div>
@@ -282,12 +287,14 @@ const SubsectionRow = ({ subsection, isNew, onFieldChange, onRequestRemove }) =>
               value={subsection.instructions}
               onChange={(e) => onFieldChange(subsection.id, "instructions", e.target.value)}
               placeholder="Add subsection instructions for students"
+              disabled
               className={cn(
                 "w-full resize-none text-sm",
                 adminTheme.radius.md,
                 adminTheme.border.default,
                 "border px-3 py-2 text-slate-900 placeholder:text-slate-400",
-                "focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                "focus:outline-none focus:ring-2 focus:ring-slate-900/10",
+                "cursor-not-allowed bg-slate-50 text-slate-400"
               )}
             />
           </div>
@@ -298,6 +305,7 @@ const SubsectionRow = ({ subsection, isNew, onFieldChange, onRequestRemove }) =>
               onChange={(e) => onFieldChange(subsection.id, "randomizeQuestions", e.target.checked)}
               title="Randomize questions"
               description="Shuffle question order within this subsection."
+              disabled
             />
           </div>
         </div>
@@ -312,11 +320,19 @@ const SubsectionRow = ({ subsection, isNew, onFieldChange, onRequestRemove }) =>
           <p className="mt-1 line-clamp-2 text-xs text-slate-500">
             {subsection.instructions || "No instructions added yet."}
           </p>
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            {subsection.dimensionId && (
-              <span className={adminTheme.badge.neutral}>{DIMENSION_LABELS[subsection.dimensionId]}</span>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
+            <span className="inline-flex items-center gap-1">
+              <Clock className="h-3.5 w-3.5" />
+              {subsection.timeLimitMinutes || 0} min
+            </span>
+            <span className="text-slate-300">&bull;</span>
+            <span>Max {subsection.questionLimit || 0} questions</span>
+            {subsection.randomizeQuestions && (
+              <>
+                <span className="text-slate-300">&bull;</span>
+                <span>Randomized</span>
+              </>
             )}
-            <span className="text-xs text-slate-400">Max {subsection.questionLimit || 0} questions</span>
           </div>
         </div>
       )}
@@ -377,23 +393,71 @@ const AddSubsectionButton = ({ onClick }) => (
 
 // ---------------------------------------------------------------------------
 // Section card
+//
+// NOTE: this used to manage its own `isEditing` state locally (seeded from
+// an `isNew` flag), so multiple section cards could be expanded at once.
+// It's now a controlled component — `isOpen` / `onToggleOpen` are owned by
+// the parent (StructureStep) so only one section card can be expanded at a
+// time (accordion behavior).
 // ---------------------------------------------------------------------------
 
 const SectionCard = ({
   section,
-  isNew,
+  isOpen,
+  onToggleOpen,
   newSubsectionIds,
+  sectionOptions,
+  sectionCodeByName,
+    sectionIdByName, 
+  sectionDescriptionByName,
+  sectionInstructionsByName,
+  sectionMandatoryByName,
+  isLoadingSections,
+  subsectionOptions,
+    subsectionIdByName,
+  subsectionCodeByName,
+  subsectionDimensionByName,
+  subsectionDescriptionByName,
+  subsectionInstructionsByName,
+  subsectionTimeLimitByName,
+  subsectionQuestionLimitByName,
+  subsectionRandomizeByName,
+  isLoadingSubsections,
   onFieldChange,
   onRequestRemove,
   onAddSubsection,
   onSubsectionFieldChange,
   onRequestRemoveSubsection,
 }) => {
-  const [isEditing, setIsEditing] = useState(isNew);
+  const isEditing = isOpen;
   const questionLimitTotal = section.subsections.reduce(
     (sum, sub) => sum + (Number(sub.questionLimit) || 0),
     0
   );
+
+  // Picking a section name from the API-backed list fills in every
+  // read-only detail field from that section's master record — code,
+  // description, instructions, and the mandatory flag. All of these fields
+  // are disabled, so this is the only way they get populated.
+   const handleSectionNameChange = (selectedName) => {
+    onFieldChange(section.id, "name", selectedName);
+
+    // Real backend id — this is what actually goes into the publish payload.
+    const matchedId = sectionIdByName?.[selectedName];
+    onFieldChange(section.id, "dbId", matchedId != null ? matchedId : null);
+
+    const matchedCode = sectionCodeByName?.[selectedName];
+    if (matchedCode != null) onFieldChange(section.id, "sectionCode", matchedCode);
+
+    const matchedDescription = sectionDescriptionByName?.[selectedName];
+    if (matchedDescription != null) onFieldChange(section.id, "description", matchedDescription);
+
+    const matchedInstructions = sectionInstructionsByName?.[selectedName];
+    if (matchedInstructions != null) onFieldChange(section.id, "instructions", matchedInstructions);
+
+    const matchedMandatory = sectionMandatoryByName?.[selectedName];
+    if (matchedMandatory != null) onFieldChange(section.id, "isMandatory", matchedMandatory);
+  };
 
   return (
     <div className={cn(adminTheme.card.base, adminTheme.shadow.sm, "group relative p-5")}>
@@ -406,7 +470,7 @@ const SectionCard = ({
         {isEditing ? (
           <button
             type="button"
-            onClick={() => setIsEditing(false)}
+            onClick={onToggleOpen}
             className="rounded-md p-1.5 text-emerald-600 transition hover:bg-emerald-50"
             aria-label="Done editing section"
           >
@@ -415,7 +479,7 @@ const SectionCard = ({
         ) : (
           <button
             type="button"
-            onClick={() => setIsEditing(true)}
+            onClick={onToggleOpen}
             className="rounded-md p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-900"
             aria-label="Edit section"
           >
@@ -432,19 +496,28 @@ const SectionCard = ({
         </button>
       </div>
 
-      <div className="flex items-start gap-3 pr-16">
+      <div
+        className="flex items-start gap-3 pr-16 cursor-pointer"
+        onClick={(e) => {
+          // Let the edit/delete buttons above handle their own clicks;
+          // clicking anywhere else on the header toggles the card.
+          if (e.target.closest("button")) return;
+          onToggleOpen();
+        }}
+      >
         <GripVertical className="mt-1 h-4 w-4 shrink-0 cursor-grab text-slate-300" />
 
         {isEditing ? (
-          <div className="min-w-0 flex-1 grid grid-cols-1 gap-3 sm:grid-cols-12">
-            <div className="sm:col-span-5">
+          <div className="min-w-0 flex-1 grid grid-cols-1 gap-3 sm:grid-cols-12" onClick={(e) => e.stopPropagation()}>
+            <div className="sm:col-span-9">
               <FieldLabel>Section Name</FieldLabel>
               <SelectInput
                 id={`${section.id}-name`}
                 value={section.name}
-                onChange={(e) => onFieldChange(section.id, "name", e.target.value)}
-                options={SECTION_NAME_OPTIONS}
+                onChange={(e) => handleSectionNameChange(e.target.value)}
+                options={sectionOptions}
               />
+              {isLoadingSections && <p className="mt-1 text-xs text-slate-400">Loading sections…</p>}
             </div>
             <div className="sm:col-span-3">
               <FieldLabel>Section Code</FieldLabel>
@@ -453,25 +526,41 @@ const SectionCard = ({
                 value={section.sectionCode}
                 onChange={(e) => onFieldChange(section.id, "sectionCode", e.target.value)}
                 placeholder="APT001"
+                disabled
               />
             </div>
-            <div className="sm:col-span-4">
-              <FieldLabel>Time Limit (mins)</FieldLabel>
-              <NumberInput
-                id={`${section.id}-timeLimit`}
-                value={section.timeLimitMinutes}
-                onChange={(e) => onFieldChange(section.id, "timeLimitMinutes", e.target.value)}
-                icon={Clock}
-              />
-            </div>
+
             <div className="sm:col-span-12">
+              <FieldLabel>Short Description</FieldLabel>
               <TextInput
                 id={`${section.id}-description`}
                 value={section.description}
                 onChange={(e) => onFieldChange(section.id, "description", e.target.value)}
                 placeholder="Short description"
+                disabled
               />
             </div>
+
+            <div className="sm:col-span-12">
+              <FieldLabel>Instructions</FieldLabel>
+              <textarea
+                id={`${section.id}-instructions`}
+                rows={3}
+                value={section.instructions}
+                onChange={(e) => onFieldChange(section.id, "instructions", e.target.value)}
+                placeholder="Add section instructions for students"
+                disabled
+                className={cn(
+                  "w-full resize-none text-sm",
+                  adminTheme.radius.md,
+                  adminTheme.border.default,
+                  "border px-3 py-2 text-slate-900 placeholder:text-slate-400",
+                  "focus:outline-none focus:ring-2 focus:ring-slate-900/10",
+                  "cursor-not-allowed bg-slate-50 text-slate-400"
+                )}
+              />
+            </div>
+
             <div className="sm:col-span-6">
               <Checkbox
                 id={`${section.id}-mandatory`}
@@ -479,6 +568,7 @@ const SectionCard = ({
                 onChange={(e) => onFieldChange(section.id, "isMandatory", e.target.checked)}
                 title="Mandatory section"
                 description="Candidate must attempt this section."
+                disabled
               />
             </div>
           </div>
@@ -487,12 +577,10 @@ const SectionCard = ({
             <h3 className="truncate text-base font-semibold text-slate-900">
               {section.name || "Untitled Section"}
             </h3>
+            <p className="mt-1 line-clamp-2 text-xs text-slate-500">
+              {section.instructions || "No instructions added yet."}
+            </p>
             <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-              <span className="inline-flex items-center gap-1">
-                <Clock className="h-3.5 w-3.5" />
-                {section.timeLimitMinutes} Mins
-              </span>
-              <span className="text-slate-300">&bull;</span>
               <span className="inline-flex items-center gap-1">
                 <HelpCircle className="h-3.5 w-3.5" />
                 Up to {questionLimitTotal || 0} Questions
@@ -510,20 +598,32 @@ const SectionCard = ({
         )}
       </div>
 
-      <div className="mt-4 space-y-3 pl-7">
-        {section.subsections.map((subsection) => (
-          <SubsectionRow
-            key={subsection.id}
-            subsection={subsection}
-            isNew={newSubsectionIds.has(subsection.id)}
-            onFieldChange={(subsectionId, field, value) =>
-              onSubsectionFieldChange(section.id, subsectionId, field, value)
-            }
-            onRequestRemove={(subsectionId) => onRequestRemoveSubsection(section.id, subsectionId)}
-          />
-        ))}
-        <AddSubsectionButton onClick={() => onAddSubsection(section.id)} />
-      </div>
+      {isEditing && (
+        <div className="mt-4 space-y-3 pl-7">
+          {section.subsections.map((subsection) => (
+            <SubsectionRow
+              key={subsection.id}
+              subsection={subsection}
+              isNew={newSubsectionIds.has(subsection.id)}
+              subsectionOptions={subsectionOptions}
+              subsectionCodeByName={subsectionCodeByName}
+                subsectionIdByName={subsectionIdByName} 
+              subsectionDimensionByName={subsectionDimensionByName}
+              subsectionDescriptionByName={subsectionDescriptionByName}
+              subsectionInstructionsByName={subsectionInstructionsByName}
+              subsectionTimeLimitByName={subsectionTimeLimitByName}
+              subsectionQuestionLimitByName={subsectionQuestionLimitByName}
+              subsectionRandomizeByName={subsectionRandomizeByName}
+              isLoadingSubsections={isLoadingSubsections}
+              onFieldChange={(subsectionId, field, value) =>
+                onSubsectionFieldChange(section.id, subsectionId, field, value)
+              }
+              onRequestRemove={(subsectionId) => onRequestRemoveSubsection(section.id, subsectionId)}
+            />
+          ))}
+          <AddSubsectionButton onClick={() => onAddSubsection(section.id)} />
+        </div>
+      )}
     </div>
   );
 };
@@ -534,49 +634,111 @@ const SectionCard = ({
 
 const StructureStep = ({
   sections,
-  newSectionIds,
   newSubsectionIds,
+  sectionOptions,
+  sectionCodeByName,
+  sectionIdByName,              // NEW
+  sectionDescriptionByName,
+  sectionInstructionsByName,
+  sectionMandatoryByName,
+  isLoadingSections,
+  subsectionOptions,
+  subsectionCodeByName,
+  subsectionIdByName,           // NEW
+  subsectionDimensionByName,
+  subsectionDescriptionByName,
+  subsectionInstructionsByName,
+  subsectionTimeLimitByName,
+  subsectionQuestionLimitByName,
+  subsectionRandomizeByName,
+  isLoadingSubsections,
   onAddSection,
   onRequestRemoveSection,
   onSectionFieldChange,
   onAddSubsection,
   onSubsectionFieldChange,
   onRequestRemoveSubsection,
-}) => (
-  <div>
-    <div className={cn(adminTheme.card.base, adminTheme.card.padding)}>
-      <h2 className="text-base font-semibold text-slate-900">Sections & Subsections</h2>
-      <p className="mt-1 text-sm text-slate-500">
-        Define the sections that make up this assessment version, and break each one down into subsections with
-        their own dimension, question limit, and instructions.
-      </p>
-    </div>
+}) => {
+  // Accordion state lives here so only one section card can be expanded at
+  // a time. Defaults to the first section being open.
+  const [openSectionId, setOpenSectionId] = useState(sections[0]?.id ?? null);
+  const prevSectionIdsRef = useRef(sections.map((s) => s.id));
 
-    <div className="mt-6 space-y-6">
-      {sections.map((section) => (
-        <SectionCard
-          key={section.id}
-          section={section}
-          isNew={newSectionIds.has(section.id)}
-          newSubsectionIds={newSubsectionIds}
-          onFieldChange={onSectionFieldChange}
-          onRequestRemove={onRequestRemoveSection}
-          onAddSubsection={onAddSubsection}
-          onSubsectionFieldChange={onSubsectionFieldChange}
-          onRequestRemoveSubsection={onRequestRemoveSubsection}
-        />
-      ))}
+  useEffect(() => {
+    const prevIds = prevSectionIdsRef.current;
+    const currentIds = sections.map((s) => s.id);
+    const addedId = currentIds.find((id) => !prevIds.includes(id));
 
-      <button
-        type="button"
-        onClick={onAddSection}
-        className={cn(adminTheme.actionButton.secondary, "w-full justify-center border-dashed")}
-      >
-        <Plus className="h-4 w-4" />
-        Add Section
-      </button>
+    if (addedId) {
+      // A new section was just added — open it and collapse everything else.
+      setOpenSectionId(addedId);
+    } else if (openSectionId && !currentIds.includes(openSectionId)) {
+      // The previously open section was removed — fall back to the first
+      // remaining one (or none, if the list is now empty).
+      setOpenSectionId(currentIds[0] ?? null);
+    }
+
+    prevSectionIdsRef.current = currentIds;
+  }, [sections, openSectionId]);
+
+  const handleToggleSection = (sectionId) => {
+    setOpenSectionId((prev) => (prev === sectionId ? null : sectionId));
+  };
+
+  return (
+    <div>
+      <div className={cn(adminTheme.card.base, adminTheme.card.padding)}>
+        <h2 className="text-base font-semibold text-slate-900">Sections & Subsections</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Define the sections that make up this assessment version, and break each one down into subsections with
+          their own dimension, question limit, and instructions.
+        </p>
+      </div>
+
+      <div className="mt-6 space-y-6">
+        {sections.map((section) => (
+          <SectionCard
+            key={section.id}
+            section={section}
+            isOpen={section.id === openSectionId}
+            onToggleOpen={() => handleToggleSection(section.id)}
+            newSubsectionIds={newSubsectionIds}
+            sectionOptions={sectionOptions}
+            sectionCodeByName={sectionCodeByName}
+              sectionIdByName={sectionIdByName}
+            sectionDescriptionByName={sectionDescriptionByName}
+            sectionInstructionsByName={sectionInstructionsByName}
+            sectionMandatoryByName={sectionMandatoryByName}
+            isLoadingSections={isLoadingSections}
+            subsectionOptions={subsectionOptions}
+            subsectionCodeByName={subsectionCodeByName}
+              subsectionIdByName={subsectionIdByName} 
+            subsectionDimensionByName={subsectionDimensionByName}
+            subsectionDescriptionByName={subsectionDescriptionByName}
+            subsectionInstructionsByName={subsectionInstructionsByName}
+            subsectionTimeLimitByName={subsectionTimeLimitByName}
+            subsectionQuestionLimitByName={subsectionQuestionLimitByName}
+            subsectionRandomizeByName={subsectionRandomizeByName}
+            isLoadingSubsections={isLoadingSubsections}
+            onFieldChange={onSectionFieldChange}
+            onRequestRemove={onRequestRemoveSection}
+            onAddSubsection={onAddSubsection}
+            onSubsectionFieldChange={onSubsectionFieldChange}
+            onRequestRemoveSubsection={onRequestRemoveSubsection}
+          />
+        ))}
+
+        <button
+          type="button"
+          onClick={onAddSection}
+          className={cn(adminTheme.actionButton.secondary, "w-full justify-center border-dashed")}
+        >
+          <Plus className="h-4 w-4" />
+          Add Section
+        </button>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 export default StructureStep;

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -27,7 +27,6 @@ import {
 import QuestionMappingStep from "./createAssessmentPages/QuestionMappingStep";
 import StructureStep, { INITIAL_SECTIONS } from "./createAssessmentPages/StructureStep";
 import VersionSettingsStep from "./createAssessmentPages/VersionSettingsStep";
-import { fetchGrades } from "@/slices/gradeSlice";
 import GradeMappingStep, {
   INITIAL_GRADES,
   VALID_BOARDS,
@@ -35,6 +34,10 @@ import GradeMappingStep, {
 import { FieldLabel, TextInput, AssessmentNameField, SelectInput } from "./createAssessmentPages/WizardFormFields";
 import ReviewStep from "./createAssessmentPages/ReviewStep";
 import { fetchReportTemplatesSlice } from "@/slices/reportSlice";
+// NEW — master-data fetches moved here from GradeMappingStep / StructureStep
+import { fetchGrades } from "@/slices/gradeSlice";
+import { fetchSections } from "@/slices/sectionSlice";
+import { fetchSubsections } from "@/slices/subsectionSlice";
 
 // ---- Step config ------------------------------------------------------
 
@@ -166,16 +169,7 @@ const normalizeLanguageValue = (languageValue) => {
   return normalized;
 };
 
-// Pulls the trailing numeric id back out of a local wizard id
-// (e.g. "section-19" -> 19, "section-19-sub-30" -> 30, "grade-25" -> 25).
-// Returns null if the id was never backed by a real database row (e.g. a
-// section/subsection added fresh in this session that hasn't been
-// persisted yet) — callers decide whether that's acceptable.
-const extractTrailingNumericId = (localId) => {
-  if (localId == null) return null;
-  const match = String(localId).match(/(\d+)$/);
-  return match ? Number(match[1]) : null;
-};
+
 
 // Drills into whatever wrapper shape the backend used
 // ({ results: { data } }, { data }, or the bare object) to reach the actual
@@ -183,12 +177,94 @@ const extractTrailingNumericId = (localId) => {
 const unwrapDraftDetail = (raw) =>
   raw?.results?.data ?? raw?.data?.data ?? raw?.data ?? raw?.results ?? raw ?? {};
 
+// Pulls the blueprint row id (the id blueprint-update/${id}/ expects) out
+// of whatever shape the detail/GET response uses. Mirrors the fallback
+// chain persistDraft() already uses for the create/POST response, plus a
+// couple of extra shapes in case the GET nests it differently (e.g. one id
+// per grade entry instead of a single top-level blueprint array).
+const extractBlueprintId = (detail) => {
+  const directCandidates = [
+    detail?.blueprint?.[0]?.id,
+    detail?.blueprint_id,
+    detail?.blueprint_items?.[0]?.id,
+    detail?.blueprint_items?.[0]?.blueprint_id,
+  ];
+
+  for (const candidate of directCandidates) {
+    if (candidate != null) return candidate;
+  }
+
+  // Some detail responses group blueprint rows per grade — check the first
+  // grade entry for an id/blueprint_id field as a last resort.
+  const firstGradeEntry = Array.isArray(detail?.blueprint_items) ? detail.blueprint_items[0] : null;
+  if (firstGradeEntry) {
+    if (firstGradeEntry.id != null) return firstGradeEntry.id;
+    if (firstGradeEntry.blueprint_id != null) return firstGradeEntry.blueprint_id;
+  }
+
+  return null;
+};
+
 const hydrateWizardFromDetail = (rawDetail) => {
   const detail = unwrapDraftDetail(rawDetail);
 
   const assessment = detail?.assessment ?? {};
   const version = detail?.assessment_version ?? detail?.version ?? {};
-  const blueprintItemsSource = Array.isArray(detail?.blueprint_items) ? detail.blueprint_items : [];
+  const rawBlueprintItems = Array.isArray(detail?.blueprint_items) ? detail.blueprint_items : [];
+  const blueprintItemsSource = rawBlueprintItems.some(
+    (item) => item?.section || item?.subsection || item?.grade
+  )
+    ? Array.from(
+      rawBlueprintItems.reduce((gradeMap, item) => {
+        const gradeId = item?.grade_id ?? item?.grade?.id;
+        const sectionId = item?.section_id ?? item?.section?.id;
+        const subsectionId = item?.subsection_id ?? item?.subsection?.id;
+        if (gradeId == null || sectionId == null || subsectionId == null) return gradeMap;
+
+        if (!gradeMap.has(gradeId)) {
+          gradeMap.set(gradeId, {
+            grade_id: gradeId,
+            board: item?.board ?? "ALL",
+            sections: [],
+          });
+        }
+
+        const gradeEntry = gradeMap.get(gradeId);
+        let sectionEntry = gradeEntry.sections.find((section) => section.section_id === sectionId);
+        if (!sectionEntry) {
+          sectionEntry = {
+            section_id: sectionId,
+            section: item.section,
+            subsections: [],
+          };
+          gradeEntry.sections.push(sectionEntry);
+        }
+
+        let subsectionEntry = sectionEntry.subsections.find(
+          (subsection) => subsection.subsection_id === subsectionId
+        );
+        if (!subsectionEntry) {
+          subsectionEntry = {
+            subsection_id: subsectionId,
+            subsection: item.subsection,
+            question_ids: [],
+          };
+          sectionEntry.subsections.push(subsectionEntry);
+        }
+
+        const questionId = item?.question?.id ?? item?.question_id;
+        if (questionId != null && !subsectionEntry.question_ids.includes(questionId)) {
+          subsectionEntry.question_ids.push(questionId);
+        }
+
+        return gradeMap;
+      }, new Map()).values()
+    )
+    : rawBlueprintItems;
+
+  // The blueprint row id (NOT assessment.id, NOT assessment_version.id) —
+  // this is what updateAssessmentDraftSlice needs to PATCH the right row.
+  const blueprintId = extractBlueprintId(detail);
 
   const nextForm = {
     ...INITIAL_FORM,
@@ -244,12 +320,12 @@ const hydrateWizardFromDetail = (rawDetail) => {
       if (!sectionsById.has(sectionId)) {
         sectionsById.set(sectionId, {
           id: localSectionId,
+            dbId: sectionId, 
           name: sectionEntry?.section?.name ?? sectionEntry?.name ?? "",
           sectionCode: sectionEntry?.section?.section_code ?? sectionEntry?.section_code ?? "",
-          description: "",
-          instructions: "",
-          timeLimitMinutes: 0,
-          isMandatory: true,
+          description: sectionEntry?.section?.description ?? "",
+          instructions: sectionEntry?.section?.instructions ?? "",
+          isMandatory: sectionEntry?.section?.is_mandatory ?? true,
           randomizeQuestions: false,
           subsections: new Map(),
         });
@@ -266,12 +342,15 @@ const hydrateWizardFromDetail = (rawDetail) => {
         if (!sectionRecord.subsections.has(subsectionId)) {
           sectionRecord.subsections.set(subsectionId, {
             id: localSubsectionId,
+              dbId: subsectionId,
             name: subEntry?.subsection?.name ?? subEntry?.name ?? "",
-            subsectionCode: "",
+            subsectionCode: subEntry?.subsection?.subsection_code ?? "",
             dimensionId: "",
-            questionLimit: 0,
-            description: "",
-            instructions: "",
+            questionLimit: subEntry?.subsection?.question_limit ?? 0,
+            timeLimitMinutes: subEntry?.subsection?.time_limit_minutes ?? subEntry?.time_limit_minutes ?? 0,
+            description: subEntry?.subsection?.description ?? "",
+            instructions: subEntry?.subsection?.instructions ?? "",
+            randomizeQuestions: subEntry?.subsection?.randomize_questions ?? false,
           });
         }
 
@@ -313,6 +392,7 @@ const hydrateWizardFromDetail = (rawDetail) => {
     sections: nextSections.length > 0 ? nextSections : INITIAL_SECTIONS,
     blueprintItems: blueprintItemsAcc,
     versionId: version?.id ?? null,
+    blueprintId, // NEW — the id updateAssessmentDraftSlice needs (e.g. 245, not assessment.id)
   };
 };
 
@@ -380,32 +460,32 @@ const buildAssessmentPayload = ({
   // Build the sections -> subsections -> question_ids tree once, then
   // repeat it under every selected grade below. Empty until Step 4/5 have
   // actually been saved through.
-  const sectionsTree = includeSections
-    ? sections
-      .map((section) => {
-        const sectionId = extractTrailingNumericId(section.id);
+const sectionsTree = includeSections
+  ? sections
+    .map((section) => {
+      const sectionId = section.dbId ?? null; // only a real backend id counts
 
-        const subsections = section.subsections
-          .map((sub) => {
-            const subsectionId = extractTrailingNumericId(sub.id);
-            const questionIds = includeQuestions
-              ? blueprintItems
-                .filter((item) => item.subsectionId === sub.id)
-                .sort((a, b) => a.sequenceNo - b.sequenceNo)
-                .map((item) => Number(item.questionId))
-                .filter((id) => Number.isFinite(id))
-              : [];
+      const subsections = section.subsections
+        .map((sub) => {
+          const subsectionId = sub.dbId ?? null; // only a real backend id counts
+          const questionIds = includeQuestions
+            ? blueprintItems
+              .filter((item) => item.subsectionId === sub.id)
+              .sort((a, b) => a.sequenceNo - b.sequenceNo)
+              .map((item) => Number(item.questionId))
+              .filter((id) => Number.isFinite(id))
+            : [];
 
-            if (subsectionId == null || questionIds.length === 0) return null;
-            return { subsection_id: subsectionId, question_ids: questionIds };
-          })
-          .filter(Boolean);
+          if (subsectionId == null) return null; // <-- removed the questionIds.length === 0 check
+          return { subsection_id: subsectionId, question_ids: questionIds };
+        })
+        .filter(Boolean);
 
-        if (sectionId == null || subsections.length === 0) return null;
-        return { section_id: sectionId, subsections };
-      })
-      .filter(Boolean)
-    : [];
+      if (sectionId == null || subsections.length === 0) return null;
+      return { section_id: sectionId, subsections };
+    })
+    .filter(Boolean)
+  : [];
 
   payload.blueprint_items = grades
     .map((g) => {
@@ -999,20 +1079,55 @@ const CreateAssessment = () => {
 
   const navigate = useNavigate();
   const dispatch = useDispatch();
-  const resumeAssessmentId = searchParams.get("id");
+  // The `id` query param identifies the draft for resuming — it holds the
+  // BLUEPRINT ROW id (e.g. 250 from `data.blueprint[0].id`), because that's
+  // what GET /asse/assessment-builder/draft/{id}/ expects. It is NOT the
+  // assessment id and NOT the assessment_version id.
+  const resumeBlueprintId = searchParams.get("id");
   const [versionId, setVersionId] = useState(null);
-    const [blueprintId, setBlueprintId] = useState(null);
+  const [blueprintId, setBlueprintId] = useState(null);
+
+  // Tracks the blueprintId persistDraft() already fetched directly (see
+  // below), so that when its navigate() then changes the URL's ?id=, the
+  // id-driven effect doesn't fire a second, duplicate GET for that same id.
+  const justFetchedBlueprintIdRef = useRef(null);
+
+  // Marks that the next `detail` update came from a silent post-save
+  // refetch (fired inside persistDraft to recover the blueprint id), not
+  // from an explicit "resume this draft" page load. Post-save refetches
+  // must NOT re-hydrate form/grades/sections/blueprintItems, because by
+  // the time they resolve the user may have already moved on and edited
+  // state that's newer than what the GET reflects — overwriting it would
+  // silently wipe their in-progress work (e.g. Structure data entered
+  // right after a Step 3 save).
+  const skipNextHydrationRef = useRef(false);
 
   const { loading, detail, detailLoading, detailError, assessmentNames } = useSelector(
     (state) => state.assessment
   );
   const { grades: gradeMasterList, gradesLoading } = useSelector((state) => state.grade);
   const { reportTemplates, reportTemplatesLoading } = useSelector((state) => state.report);
+  // Section master catalog — powers the "Section Name" dropdown in Step 4
+  // (StructureStep). Aliased to `sectionMasterList` so it doesn't collide
+  // with the wizard's own `sections` state above.
+  const { sections: sectionMasterList, sectionsLoading } = useSelector((state) => state.section);
+  // Subsection master catalog — powers the "Subsection Name" dropdown in
+  // Step 4, same aliasing reasoning as sections above.
+  const { subsections: subsectionMasterList, subsectionsLoading } = useSelector((state) => state.subsection);
 
+  // Fires every master-data fetch the wizard needs, up front, once on
+  // mount — assessment names, report templates, grades, sections, and
+  // subsections. Previously fetchGrades()/fetchSections()/fetchSubsections()
+  // lived inside GradeMappingStep / StructureStep and only fired once the
+  // user actually reached Step 3 / Step 4. Centralizing them here means the
+  // dropdowns are already populated (or at least loading) well before the
+  // user gets to those steps.
   useEffect(() => {
     dispatch(fetchAssessmentNamesSlice());
-    dispatch(fetchGrades());
     dispatch(fetchReportTemplatesSlice());
+    dispatch(fetchGrades());
+    dispatch(fetchSections());
+    dispatch(fetchSubsections());
   }, [dispatch]);
 
   // Grade select values are the grade's numeric database id (as a string) —
@@ -1044,6 +1159,201 @@ const CreateAssessment = () => {
     return [{ value: "", label: "Select Report Template" }, ...apiOptions];
   }, [reportTemplates]);
 
+  // Section master catalog — carries description/instructions/mandatory
+  // too, so StructureStep can prefill those (read-only) fields when a
+  // section name is picked, not just the section code.
+  const sectionMasterOptions = useMemo(() => {
+    const list = Array.isArray(sectionMasterList) ? sectionMasterList : [];
+    return list
+      .map((s) => ({
+            id: s.id,
+        name: s.name ?? s.section_name ?? "",
+        code: s.section_code ?? s.code ?? "",
+        description: s.description ?? "",
+        instructions: s.instructions ?? "",
+        isMandatory: s.is_mandatory ?? true,
+      }))
+      .filter((s) => s.name);
+  }, [sectionMasterList]);
+
+  const sectionOptions = useMemo(
+    () => [
+      { value: "", label: "Select Section" },
+      ...sectionMasterOptions.map((s) => ({ value: s.name, label: s.name })),
+    ],
+    [sectionMasterOptions]
+  );
+
+  // Lets StructureStep auto-fill a section's code when its name is picked
+  // from the dropdown, e.g. { "Aptitude": "APT001" }.
+  const sectionCodeByName = useMemo(
+    () =>
+      sectionMasterOptions.reduce((acc, s) => {
+        if (s.code) acc[s.name] = s.code;
+        return acc;
+      }, {}),
+    [sectionMasterOptions]
+  );
+
+  // Lets StructureStep set a section's real backend id (dbId) when its name
+  // is picked from the dropdown — this is what actually goes in the payload.
+  const sectionIdByName = useMemo(
+    () =>
+      sectionMasterOptions.reduce((acc, s) => {
+        if (s.id != null) acc[s.name] = s.id;
+        return acc;
+      }, {}),
+    [sectionMasterOptions]
+  );
+
+  // Lets StructureStep auto-fill a section's description when its name is
+  // picked from the dropdown.
+  const sectionDescriptionByName = useMemo(
+    () =>
+      sectionMasterOptions.reduce((acc, s) => {
+        acc[s.name] = s.description;
+        return acc;
+      }, {}),
+    [sectionMasterOptions]
+  );
+
+  // Lets StructureStep auto-fill a section's instructions when its name is
+  // picked from the dropdown.
+  const sectionInstructionsByName = useMemo(
+    () =>
+      sectionMasterOptions.reduce((acc, s) => {
+        acc[s.name] = s.instructions;
+        return acc;
+      }, {}),
+    [sectionMasterOptions]
+  );
+
+  // Lets StructureStep auto-fill a section's mandatory flag when its name
+  // is picked from the dropdown.
+  const sectionMandatoryByName = useMemo(
+    () =>
+      sectionMasterOptions.reduce((acc, s) => {
+        acc[s.name] = s.isMandatory;
+        return acc;
+      }, {}),
+    [sectionMasterOptions]
+  );
+
+  // Subsection master catalog — carries description/instructions/
+  // time_limit_minutes/question_limit/randomize_questions too, so
+  // StructureStep can prefill those (read-only) fields when a subsection
+  // name is picked, not just the code/dimension.
+  const subsectionMasterOptions = useMemo(() => {
+    const list = Array.isArray(subsectionMasterList) ? subsectionMasterList : [];
+    return list
+      .map((s) => ({
+            id: s.id,
+        name: s.name ?? s.subsection_name ?? "",
+        code: s.subsection_code ?? s.code ?? "",
+        dimensionId: s.dimension_id ?? s.dimension_code ?? s.dimension ?? "",
+        description: s.description ?? "",
+        instructions: s.instructions ?? "",
+        timeLimitMinutes: s.time_limit_minutes ?? 0,
+        questionLimit: s.question_limit ?? 0,
+        randomizeQuestions: s.randomize_questions ?? false,
+      }))
+      .filter((s) => s.name);
+  }, [subsectionMasterList]);
+
+  const subsectionOptions = useMemo(
+    () => [
+      { value: "", label: "Select Subsection" },
+      ...subsectionMasterOptions.map((s) => ({ value: s.name, label: s.name })),
+    ],
+    [subsectionMasterOptions]
+  );
+
+  // Lets StructureStep auto-fill a subsection's code and primary dimension
+  // when its name is picked from the dropdown.
+  const subsectionCodeByName = useMemo(
+    () =>
+      subsectionMasterOptions.reduce((acc, s) => {
+        if (s.code) acc[s.name] = s.code;
+        return acc;
+      }, {}),
+    [subsectionMasterOptions]
+  );
+
+  const subsectionDimensionByName = useMemo(
+    () =>
+      subsectionMasterOptions.reduce((acc, s) => {
+        if (s.dimensionId) acc[s.name] = s.dimensionId;
+        return acc;
+      }, {}),
+    [subsectionMasterOptions]
+  );
+
+  // Lets StructureStep set a subsection's real backend id (dbId) when its
+  // name is picked from the dropdown — this is what actually goes in the payload.
+  const subsectionIdByName = useMemo(
+    () =>
+      subsectionMasterOptions.reduce((acc, s) => {
+        if (s.id != null) acc[s.name] = s.id;
+        return acc;
+      }, {}),
+    [subsectionMasterOptions]
+  );
+
+  // Lets StructureStep auto-fill a subsection's description when its name
+  // is picked from the dropdown.
+  const subsectionDescriptionByName = useMemo(
+    () =>
+      subsectionMasterOptions.reduce((acc, s) => {
+        acc[s.name] = s.description;
+        return acc;
+      }, {}),
+    [subsectionMasterOptions]
+  );
+
+  // Lets StructureStep auto-fill a subsection's instructions when its name
+  // is picked from the dropdown.
+  const subsectionInstructionsByName = useMemo(
+    () =>
+      subsectionMasterOptions.reduce((acc, s) => {
+        acc[s.name] = s.instructions;
+        return acc;
+      }, {}),
+    [subsectionMasterOptions]
+  );
+
+  // Lets StructureStep auto-fill a subsection's time limit when its name is
+  // picked from the dropdown.
+  const subsectionTimeLimitByName = useMemo(
+    () =>
+      subsectionMasterOptions.reduce((acc, s) => {
+        acc[s.name] = s.timeLimitMinutes;
+        return acc;
+      }, {}),
+    [subsectionMasterOptions]
+  );
+
+  // Lets StructureStep auto-fill a subsection's question limit when its
+  // name is picked from the dropdown.
+  const subsectionQuestionLimitByName = useMemo(
+    () =>
+      subsectionMasterOptions.reduce((acc, s) => {
+        acc[s.name] = s.questionLimit;
+        return acc;
+      }, {}),
+    [subsectionMasterOptions]
+  );
+
+  // Lets StructureStep auto-fill a subsection's randomize flag when its
+  // name is picked from the dropdown.
+  const subsectionRandomizeByName = useMemo(
+    () =>
+      subsectionMasterOptions.reduce((acc, s) => {
+        acc[s.name] = s.randomizeQuestions;
+        return acc;
+      }, {}),
+    [subsectionMasterOptions]
+  );
+
   const apiAssessmentNames = useMemo(
     () =>
       (Array.isArray(assessmentNames) ? assessmentNames : [])
@@ -1072,23 +1382,38 @@ const CreateAssessment = () => {
   };
 
   useEffect(() => {
-    setForm(INITIAL_FORM);
-    setSections(INITIAL_SECTIONS);
-    setGrades(INITIAL_GRADES);
-    setBlueprintItems([]);
-    setVersionId(null);
-    setCurrentStep(1);
-    setValidationErrors({});
-    setLastSavedAt(null);
-
-    dispatch(resetAssessmentDetail());
-
-    if (!resumeAssessmentId) {
+    if (!resumeBlueprintId) {
+      // Fresh "create new assessment" navigation (no id in the URL) —
+      // clear out any leftover state from a previously edited draft.
+      setForm(INITIAL_FORM);
+      setSections(INITIAL_SECTIONS);
+      setGrades(INITIAL_GRADES);
+      setBlueprintItems([]);
+      setVersionId(null);
+      setBlueprintId(null);
+      setCurrentStep(1);
+      setValidationErrors({});
+      setLastSavedAt(null);
+      dispatch(resetAssessmentDetail());
       return;
     }
 
-    void dispatch(fetchAssessmentDetailSlice(resumeAssessmentId));
-  }, [dispatch, resumeAssessmentId]);
+    // Seed blueprintId straight from the URL param immediately — it IS the
+    // blueprint row id, no need to wait on a response to know it.
+    setBlueprintId(Number(resumeBlueprintId));
+
+    // Skip if persistDraft() already fetched this exact id itself (e.g. we
+    // just navigated here after a create) — avoids firing the GET twice
+    // for the same save.
+    if (justFetchedBlueprintIdRef.current === Number(resumeBlueprintId)) {
+      justFetchedBlueprintIdRef.current = null;
+      return;
+    }
+
+    // GET /asse/assessment-builder/draft/{blueprintId}/ — covers page
+    // loads/refreshes and directly-opened "resume draft" links.
+    void dispatch(fetchAssessmentDetailSlice(resumeBlueprintId));
+  }, [dispatch, resumeBlueprintId]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -1099,16 +1424,37 @@ const CreateAssessment = () => {
   useEffect(() => {
     if (!detail) return;
 
+    if (skipNextHydrationRef.current) {
+      // This `detail` update came from persistDraft's own post-save
+      // refetch (used only to recover the blueprint id) — the live form
+      // state may already be ahead of what this response reflects, so
+      // don't stomp on it.
+      skipNextHydrationRef.current = false;
+      return;
+    }
+
     const hydrated = hydrateWizardFromDetail(detail);
     setForm(hydrated.form);
     setGrades(hydrated.grades);
     setSections(hydrated.sections);
     setBlueprintItems(hydrated.blueprintItems);
-     setBlueprintId(hydrated.blueprintId);
+
+    // Only overwrite blueprintId if the GET actually gave us a real value —
+    // never stomp a known-good id (e.g. the one captured right after the
+    // create/POST call) with undefined/null just because this particular
+    // detail payload didn't carry it in the shape we expected.
+    if (hydrated.blueprintId != null) {
+      setBlueprintId(hydrated.blueprintId);
+    }
+
     setVersionId(hydrated.versionId);
-    setCurrentStep(1);
-    setValidationErrors({});
-    setLastSavedAt(null);
+
+    // Deliberately NOT resetting currentStep, validationErrors, or
+    // lastSavedAt here: this GET now fires right after every create
+    // (keyed on the blueprint id), which can resolve well after the user
+    // has already moved on to a later step. Forcing them back to Step 1 or
+    // clearing the "Saved at ..." indicator at that point would undo
+    // progress the user has already made in this same session.
   }, [detail]);
 
   useEffect(() => {
@@ -1145,61 +1491,65 @@ const CreateAssessment = () => {
     }
   };
 
-  const persistDraft = useCallback(async () => {
+  const persistDraft = useCallback(async (overrides = {}) => {
     setIsSavingDraft(true);
 
     try {
       const draftPayload = buildAssessmentPayload({
-        form,
-        grades,
-        sections,
-        blueprintItems,
+        form: overrides.form ?? form,
+        grades: overrides.grades ?? grades,
+        sections: overrides.sections ?? sections,
+        blueprintItems: overrides.blueprintItems ?? blueprintItems,
         isDraft: true,
-        step: currentStep,
+        step: overrides.step ?? currentStep,
       });
       console.log("Draft save payload:", draftPayload);
 
-      // Update calls target the blueprint row id (e.g. 245 in
-      // { data: { blueprint: [{ id: 245, ... }] } }) — NOT
-      // assessment.id and NOT assessment_version.id. If we're resuming a
-      // draft but haven't hydrated a real blueprintId yet (detail fetch
-      // still in flight), refuse to save rather than guessing.
-      if (resumeAssessmentId && !blueprintId) {
+      if (resumeBlueprintId && !versionId) {
         throw new Error("Draft is still loading — please wait a moment and try again.");
       }
 
-      const saveThunk = resumeAssessmentId
-        ? updateAssessmentDraftSlice({ id: blueprintId, payload: draftPayload })
+      const saveThunk = resumeBlueprintId
+        ? updateAssessmentDraftSlice({ id: versionId, payload: draftPayload })
         : publishAssessmentSlice(draftPayload);
 
       const result = await dispatch(saveThunk).unwrap();
       console.log("Draft save success:", result);
 
-      // Assessment id — used only to build the ?id= URL param so the page
-      // can be resumed later (GET .../draft/${assessmentId}/).
-      const nextAssessmentId =
-        result?.data?.assessment?.id ??
-        result?.assessment?.id ??
-        result?.assessment_id ??
-        result?.id ??
-        result?.data?.assessment_id;
+      const nextVersionId =
+        result?.data?.assessment_version?.id ?? result?.assessment_version?.id ?? null;
 
-      // Blueprint row id — this is what blueprint-update/${id}/ expects.
-      // The create/draft response nests it under data.blueprint (an array;
-      // the first entry is the placeholder row for this version).
       const nextBlueprintId =
         result?.data?.blueprint?.[0]?.id ??
         result?.blueprint?.[0]?.id ??
+        result?.data?.blueprint_id ??
+        result?.blueprint_id ??
         result?.data?.blueprint_items?.[0]?.id ??
         result?.blueprint_items?.[0]?.id ??
         null;
 
-      if (nextBlueprintId) {
-        setBlueprintId(nextBlueprintId);
+      const draftDetailId =
+        nextBlueprintId ??
+        blueprintId ??
+        (resumeBlueprintId ? Number(resumeBlueprintId) : null) ??
+        nextVersionId;
+
+      if (nextVersionId != null) {
+        setVersionId(nextVersionId);
       }
 
-      if (nextAssessmentId && !resumeAssessmentId) {
-        navigate(`/s-admin/create-assessment?id=${nextAssessmentId}`, { replace: true });
+      if (draftDetailId != null && Number.isFinite(Number(draftDetailId))) {
+        setBlueprintId(Number(draftDetailId));
+      }
+
+      if (draftDetailId != null && Number.isFinite(Number(draftDetailId)) && !resumeBlueprintId) {
+        navigate(`/s-admin/create-assessment?id=${draftDetailId}`, { replace: true });
+      }
+
+      if (draftDetailId != null && Number.isFinite(Number(draftDetailId))) {
+        justFetchedBlueprintIdRef.current = Number(draftDetailId);
+        skipNextHydrationRef.current = true;
+        void dispatch(fetchAssessmentDetailSlice(Number(draftDetailId)));
       }
 
       setLastSavedAt(new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }));
@@ -1210,7 +1560,7 @@ const CreateAssessment = () => {
     } finally {
       setIsSavingDraft(false);
     }
-  }, [currentStep, dispatch, form, grades, navigate, resumeAssessmentId, sections, blueprintItems, blueprintId]);
+  }, [currentStep, dispatch, form, grades, navigate, resumeBlueprintId, sections, blueprintItems, versionId, blueprintId]);
   
   const handleDiscardClick = () => {
     setIsDiscardModalOpen(true);
@@ -1283,6 +1633,7 @@ const CreateAssessment = () => {
       ...prev,
       {
         id: newId,
+          dbId: null, 
         name: `Section ${nextIndex}`,
         sectionCode: `SECTION_${nextIndex}`,
         description: "",
@@ -1321,10 +1672,12 @@ const CreateAssessment = () => {
               ...section.subsections,
               {
                 id: newId,
+                dbId: null, // not persisted yet
                 name: "Untitled Subsection",
                 subsectionCode: `SUB_${section.subsections.length + 1}`,
                 dimensionId: "",
                 questionLimit: 0,
+                timeLimitMinutes: 0,
                 description: "Add a short description for this subsection.",
                 instructions: "",
               },
@@ -1428,8 +1781,9 @@ const CreateAssessment = () => {
 
   // --- Step 5: Question Mapping (blueprint items) ---
 
-  const handleAddBlueprintQuestions = (sectionId, subsectionId, questionIds) => {
+  const handleAddBlueprintQuestions = async (sectionId, subsectionId, questionIds) => {
     const startingSequence = blueprintItems.filter((item) => item.subsectionId === subsectionId).length;
+
     const newItems = questionIds.map((questionId, index) => ({
       id: `bp-${subsectionId}-${Date.now()}-${index}`,
       sectionId,
@@ -1443,7 +1797,18 @@ const CreateAssessment = () => {
       isVisible: true,
       status: "ACTIVE",
     }));
-    setBlueprintItems((prev) => [...prev, ...newItems]);
+
+    const updatedBlueprintItems = [...blueprintItems, ...newItems];
+    setBlueprintItems(updatedBlueprintItems);
+
+    try {
+      // Save immediately, using the freshly-computed array rather than the
+      // (still-stale) `blueprintItems` closure value.
+      await persistDraft({ blueprintItems: updatedBlueprintItems });
+    } catch (error) {
+      console.error("Failed to save draft after assigning questions:", error);
+      // optionally surface a toast here
+    }
   };
 
   const handleRemoveBlueprintItem = (itemId) => {
@@ -1540,6 +1905,23 @@ const CreateAssessment = () => {
                 sections={sections}
                 newSectionIds={newSectionIds}
                 newSubsectionIds={newSubsectionIds}
+                sectionOptions={sectionOptions}
+                sectionCodeByName={sectionCodeByName}
+                  sectionIdByName={sectionIdByName}  
+                sectionDescriptionByName={sectionDescriptionByName}
+                sectionInstructionsByName={sectionInstructionsByName}
+                sectionMandatoryByName={sectionMandatoryByName}
+                isLoadingSections={sectionsLoading}
+                subsectionOptions={subsectionOptions}
+                subsectionCodeByName={subsectionCodeByName}
+                  subsectionIdByName={subsectionIdByName}  
+                subsectionDimensionByName={subsectionDimensionByName}
+                subsectionDescriptionByName={subsectionDescriptionByName}
+                subsectionInstructionsByName={subsectionInstructionsByName}
+                subsectionTimeLimitByName={subsectionTimeLimitByName}
+                subsectionQuestionLimitByName={subsectionQuestionLimitByName}
+                subsectionRandomizeByName={subsectionRandomizeByName}
+                isLoadingSubsections={subsectionsLoading}
                 onAddSection={handleAddSection}
                 onRequestRemoveSection={handleRequestRemoveSection}
                 onSectionFieldChange={handleSectionFieldChange}
@@ -1553,6 +1935,7 @@ const CreateAssessment = () => {
               <QuestionMappingStep
                 sections={sections}
                 blueprintItems={blueprintItems}
+                    versionId={versionId}   
                 onAddQuestions={handleAddBlueprintQuestions}
                 onFieldChange={handleBlueprintFieldChange}
                 onToggleVisibility={handleBlueprintFieldChange}

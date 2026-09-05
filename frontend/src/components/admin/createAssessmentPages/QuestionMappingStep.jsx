@@ -248,7 +248,7 @@ const BlueprintItemRow = ({ item, question, index, total, onMoveUp, onMoveDown, 
 
 // sections: the wizard's live `sections` state (id, name, subsections[{id, name, dimensionId, questionLimit}], ...)
 // blueprintItems: [{ id, sectionId, subsectionId, questionId, sequenceNo, marksOverride, negativeMarksOverride, isMandatory, isRandomizable, isVisible, status }]
-const QuestionMappingStep = ({ sections, blueprintItems, onAddQuestions, onFieldChange, onToggleVisibility, onRequestRemove, onMoveItem }) => {
+const QuestionMappingStep = ({ sections, blueprintItems,  versionId,  onAddQuestions, onFieldChange, onToggleVisibility, onRequestRemove, onMoveItem }) => {
   const firstSection = sections[0];
   const firstSubsection = firstSection?.subsections?.[0];
 
@@ -379,6 +379,7 @@ const QuestionMappingStep = ({ sections, blueprintItems, onAddQuestions, onField
       <AssignQuestionModal
         open={isAssignOpen && Boolean(selectedSubsection)}
         subsection={selectedSubsection}
+          versionId={versionId}  
         versionGrade={null}
         availableQuestions={availableQuestions}
         onClose={() => setIsAssignOpen(false)}

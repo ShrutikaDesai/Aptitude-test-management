@@ -7,7 +7,7 @@ import subsectionReducer from "./slices/subsectionSlice";
 import questionReducer from "./slices/questionSlice";
 import tagReducer from "./slices/tagSlice";
 import reportReducer from "./slices/reportSlice";
-
+import questionMappingReducer from "./slices/questionMappingSlice";
 // student imports
 import studentSectionReducer from "./slices/student-slices/studentSectionSlice";
 import studentSubsectionReducer from "./slices/student-slices/studentSubsectionSlice";
@@ -25,7 +25,7 @@ export const store = configureStore({
     question: questionReducer,
     tag: tagReducer,
     report: reportReducer,
-    
+    questionMapping: questionMappingReducer,
 
     // student reducers
     studentSection: studentSectionReducer,

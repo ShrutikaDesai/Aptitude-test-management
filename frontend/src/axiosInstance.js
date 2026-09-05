@@ -103,8 +103,9 @@
 import axios from "axios";
 
 const axiosInstance = axios.create({
-    // baseURL: "http://192.168.1.4:8000/api/v1/",
-     baseURL: "http://10.45.19.38:8000/api/v1/",
+    baseURL: "http://192.168.195.38/api/v1/",
+    //  baseURL: "http://10.45.19.38:8000/api/v1/",
+    // baseURL: "https://dodge-decorating-connected-mandatory.trycloudflare.com/api/v1/",
 });
 
 const publicEndpoints = [

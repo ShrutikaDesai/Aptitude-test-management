@@ -7,10 +7,12 @@ import { FieldLabel, SelectInput } from "./WizardFormFields";
 // Step 3: Grade & Board Mapping (assessment_version_grade_mapping)
 // Rendered by CreateAssessment.jsx when currentStep === 3.
 //
-// Grade options now come from the /asse/grades/ API (see gradeSlice.js /
-// fetchGrades) instead of a static list — CreateAssessment.jsx fetches them
-// and passes `gradeOptions` / `isLoadingGrades` down as props. Board options
-// stay static here since they aren't backed by a master table yet.
+// Grade options come from the /asse/grades/ API (see gradeSlice.js /
+// fetchGrades). The fetch itself is dispatched once from CreateAssessment.jsx
+// on mount (along with sections/subsections), which then passes the
+// resolved `gradeOptions` / `isLoadingGrades` down as props — this component
+// no longer dispatches anything itself. Board options stay static here
+// since they aren't backed by a master table yet.
 // ---------------------------------------------------------------------------
 
 // assessment_version_grade_mapping.board
