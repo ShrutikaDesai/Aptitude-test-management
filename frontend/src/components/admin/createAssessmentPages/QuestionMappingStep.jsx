@@ -1,14 +1,15 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
   ChevronRight,
+  ChevronLeft,
+  ChevronsLeft,
+  ChevronsRight,
   GripVertical,
   Plus,
   Trash2,
   Info,
-  Eye,
-  EyeOff,
   Hash,
   Layers,
   ListTree,
@@ -77,6 +78,8 @@ const ALL_QUESTIONS_BY_ID = Object.values(MOCK_QUESTION_BANK_BY_DIMENSION)
   .flat()
   .reduce((acc, q) => ({ ...acc, [q.id]: q }), {});
 
+const PAGE_SIZE_OPTIONS = [20, 50, 100];
+
 // ---- Small building blocks -------------------------------------------------
 
 const DIFFICULTY_STYLES = {
@@ -97,27 +100,40 @@ const DifficultyBadge = ({ difficulty }) => (
   </span>
 );
 
-const Switch = ({ checked, onChange, label }) => (
+// disabled: renders a non-interactive, muted-looking switch that still
+// reflects `checked` but ignores clicks — used where a field is read-only
+// here but still meaningful to show (e.g. Mandatory, locked post-assignment).
+const Switch = ({ checked, onChange, label, disabled = false }) => (
   <button
     type="button"
     role="switch"
     aria-checked={checked}
     aria-label={label}
-    onClick={() => onChange(!checked)}
-    className={cn("relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition", checked ? "bg-slate-900" : "bg-slate-200")}
+    aria-disabled={disabled}
+    disabled={disabled}
+    onClick={() => !disabled && onChange(!checked)}
+    className={cn(
+      "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition",
+      checked ? "bg-slate-900" : "bg-slate-200",
+      disabled && "cursor-not-allowed opacity-50"
+    )}
   >
     <span className={cn("inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition", checked ? "translate-x-4.5" : "translate-x-1")} />
   </button>
 );
 
-const InlineNumberInput = ({ value, onChange, min = 0, step = 0.5 }) => (
+const InlineNumberInput = ({ value, onChange, min = 0, step = 0.5, disabled = false }) => (
   <input
     type="number"
     value={value}
     min={min}
     step={step}
+    disabled={disabled}
     onChange={(e) => onChange(Number(e.target.value))}
-    className="h-8 w-16 rounded-md border border-slate-200 bg-white px-2 text-center text-sm font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+    className={cn(
+      "h-8 w-16 rounded-md border border-slate-200 bg-white px-2 text-center text-sm font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/10",
+      disabled && "cursor-not-allowed border-slate-100 bg-slate-50 text-slate-400"
+    )}
   />
 );
 
@@ -163,7 +179,8 @@ const StructureTree = ({ sections, countsBySubsection, selectedSubsectionId, onS
                     isSelected ? "bg-white/15 text-white" : isOverLimit ? "bg-red-50 text-red-600" : "bg-slate-100 text-slate-500"
                   )}
                 >
-                  {count}/{limit}
+                  {/* {count}/{limit} */}
+                    {count}
                 </span>
               </button>
             );
@@ -176,85 +193,169 @@ const StructureTree = ({ sections, countsBySubsection, selectedSubsectionId, onS
 
 // ---- One mapped question row -----------------------------------------------
 
-const BlueprintItemRow = ({ item, question, index, total, onMoveUp, onMoveDown, onFieldChange, onToggleVisibility, onRemove }) => (
-  <div className={cn(adminTheme.card.base, "p-4")}>
-    <div className="flex items-start gap-3">
-      <div className="flex shrink-0 flex-col items-center gap-1 pt-1">
-        <GripVertical className="h-4 w-4 text-slate-300" />
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-500">
-          {item.sequenceNo}
-        </span>
-      </div>
+// Note: Visible field has been removed entirely (no toggle, no eye icon).
+// Marks, Negative, and Mandatory are still displayed but are read-only —
+// they render disabled so their current values stay visible without being
+// editable from this row.
+const BlueprintItemRow = ({ item, question, index, total, onMoveUp, onMoveDown, onRemove }) => {
+  const displayCode = item.questionCode || question?.id || item.questionId;
+  const displayPrompt = item.questionText || question?.prompt;
 
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-semibold text-slate-400">{question?.id ?? item.questionId}</span>
-          {question && <TypeBadge type={question.type} />}
-          {question && <DifficultyBadge difficulty={question.difficulty} />}
+  return (
+    <div className={cn(adminTheme.card.base, "p-4")}>
+      <div className="flex items-start gap-3">
+        <div className="flex shrink-0 flex-col items-center gap-1 pt-1">
+          <GripVertical className="h-4 w-4 text-slate-300" />
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-500">
+            {item.sequenceNo}
+          </span>
         </div>
-        <p className="mt-1.5 text-sm font-semibold leading-snug text-slate-900">
-          {question?.prompt ?? "Question no longer in the library — remove or replace this mapping."}
-        </p>
 
-        <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2">
-          <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-            Marks
-            <InlineNumberInput value={item.marksOverride} onChange={(v) => onFieldChange(item.id, "marksOverride", v)} />
-          </label>
-          <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-            Negative
-            <InlineNumberInput value={item.negativeMarksOverride} onChange={(v) => onFieldChange(item.id, "negativeMarksOverride", v)} />
-          </label>
-          <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
-            <Switch checked={item.isMandatory} onChange={(v) => onFieldChange(item.id, "isMandatory", v)} label="Mandatory" />
-            Mandatory
-          </label>
-          <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
-            <Switch checked={item.isVisible} onChange={(v) => onToggleVisibility(item.id, v)} label="Visible" />
-            {item.isVisible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-            Visible
-          </label>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-slate-400">{displayCode}</span>
+            {question && <TypeBadge type={question.type} />}
+            {question && <DifficultyBadge difficulty={question.difficulty} />}
+          </div>
+          <p className="mt-1.5 text-sm font-semibold leading-snug text-slate-900">
+            {displayPrompt ?? "Question no longer in the library — remove or replace this mapping."}
+          </p>
+
+          <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2">
+            <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+              Marks
+              <InlineNumberInput value={item.marksOverride} onChange={() => {}} disabled />
+            </label>
+            <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+              Negative
+              <InlineNumberInput value={item.negativeMarksOverride} onChange={() => {}} disabled />
+            </label>
+            <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
+              <Switch checked={item.isMandatory} onChange={() => {}} label="Mandatory" disabled />
+              Mandatory
+            </label>
+          </div>
         </div>
-      </div>
 
-      <div className="flex shrink-0 flex-col items-center gap-1">
-        <button
-          type="button"
-          onClick={() => onMoveUp(item.id)}
-          disabled={index === 0}
-          className={cn("rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-900", index === 0 && "cursor-not-allowed opacity-30 hover:bg-transparent hover:text-slate-400")}
-          aria-label="Move up"
-        >
-          <ChevronUp className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          onClick={() => onMoveDown(item.id)}
-          disabled={index === total - 1}
-          className={cn("rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-900", index === total - 1 && "cursor-not-allowed opacity-30 hover:bg-transparent hover:text-slate-400")}
-          aria-label="Move down"
-        >
-          <ChevronDown className="h-4 w-4" />
-        </button>
-        <button type="button" onClick={() => onRemove(item.id)} className="mt-1 rounded-md p-1 text-slate-300 hover:bg-red-50 hover:text-red-600" aria-label="Remove from blueprint">
-          <Trash2 className="h-4 w-4" />
-        </button>
+        <div className="flex shrink-0 flex-col items-center gap-1">
+          <button
+            type="button"
+            onClick={() => onMoveUp(item.id)}
+            disabled={index === 0}
+            className={cn("rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-900", index === 0 && "cursor-not-allowed opacity-30 hover:bg-transparent hover:text-slate-400")}
+            aria-label="Move up"
+          >
+            <ChevronUp className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onMoveDown(item.id)}
+            disabled={index === total - 1}
+            className={cn("rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-900", index === total - 1 && "cursor-not-allowed opacity-30 hover:bg-transparent hover:text-slate-400")}
+            aria-label="Move down"
+          >
+            <ChevronDown className="h-4 w-4" />
+          </button>
+          <button type="button" onClick={() => onRemove(item.id)} className="mt-1 rounded-md p-1 text-slate-300 hover:bg-red-50 hover:text-red-600" aria-label="Remove from blueprint">
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
+
+// ---- Pagination bar ---------------------------------------------------
+
+const PaginationBar = ({ currentPage, totalPages, totalCount, pageSize, onPageChange, onPageSizeChange }) => {
+  if (totalCount === 0) return null;
+
+  const startItem = (currentPage - 1) * pageSize + 1;
+  const endItem = Math.min(currentPage * pageSize, totalCount);
+
+  return (
+    <div className={cn(adminTheme.card.base, "flex flex-wrap items-center justify-between gap-3 px-4 py-3")}>
+      <p className="text-xs font-medium text-slate-500">
+        Showing <span className="font-semibold text-slate-900">{startItem}–{endItem}</span> of{" "}
+        <span className="font-semibold text-slate-900">{totalCount}</span> mapped questions
+      </p>
+
+      <div className="flex items-center gap-4">
+        <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
+          Per page
+          <select
+            value={pageSize}
+            onChange={(e) => onPageSizeChange(Number(e.target.value))}
+            className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+          >
+            {PAGE_SIZE_OPTIONS.map((size) => (
+              <option key={size} value={size}>
+                {size}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => onPageChange(1)}
+            disabled={currentPage === 1}
+            className={cn("rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-900", currentPage === 1 && "cursor-not-allowed opacity-30 hover:bg-transparent hover:text-slate-400")}
+            aria-label="First page"
+          >
+            <ChevronsLeft className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onPageChange(currentPage - 1)}
+            disabled={currentPage === 1}
+            className={cn("rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-900", currentPage === 1 && "cursor-not-allowed opacity-30 hover:bg-transparent hover:text-slate-400")}
+            aria-label="Previous page"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <span className="min-w-[80px] text-center text-xs font-semibold text-slate-600">
+            Page {currentPage} of {totalPages}
+          </span>
+          <button
+            type="button"
+            onClick={() => onPageChange(currentPage + 1)}
+            disabled={currentPage === totalPages}
+            className={cn("rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-900", currentPage === totalPages && "cursor-not-allowed opacity-30 hover:bg-transparent hover:text-slate-400")}
+            aria-label="Next page"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onPageChange(totalPages)}
+            disabled={currentPage === totalPages}
+            className={cn("rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-900", currentPage === totalPages && "cursor-not-allowed opacity-30 hover:bg-transparent hover:text-slate-400")}
+            aria-label="Last page"
+          >
+            <ChevronsRight className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // ---- Step -------------------------------------------------------------
 
-// sections: the wizard's live `sections` state (id, name, subsections[{id, name, dimensionId, questionLimit}], ...)
-// blueprintItems: [{ id, sectionId, subsectionId, questionId, sequenceNo, marksOverride, negativeMarksOverride, isMandatory, isRandomizable, isVisible, status }]
-const QuestionMappingStep = ({ sections, blueprintItems,  versionId,  onAddQuestions, onFieldChange, onToggleVisibility, onRequestRemove, onMoveItem }) => {
+const QuestionMappingStep = ({ sections, blueprintItems, versionId, onAddQuestions, onFieldChange, onToggleVisibility, onRequestRemove, onMoveItem }) => {
   const firstSection = sections[0];
   const firstSubsection = firstSection?.subsections?.[0];
 
   const [selectedSectionId, setSelectedSectionId] = useState(firstSection?.id ?? null);
   const [selectedSubsectionId, setSelectedSubsectionId] = useState(firstSubsection?.id ?? null);
   const [isAssignOpen, setIsAssignOpen] = useState(false);
+
+  // Pagination state — lives here since 500+ mapped questions in one
+  // subsection would otherwise render 500+ BlueprintItemRow cards at once.
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
 
   const selectedSection = sections.find((s) => s.id === selectedSectionId) ?? firstSection;
   const selectedSubsection = selectedSection?.subsections.find((s) => s.id === selectedSubsectionId) ?? firstSubsection;
@@ -275,6 +376,23 @@ const QuestionMappingStep = ({ sections, blueprintItems,  versionId,  onAddQuest
     [blueprintItems, selectedSubsection?.id]
   );
 
+  const totalPages = Math.max(1, Math.ceil(subsectionItems.length / pageSize));
+
+  // Reset to page 1 whenever the selected subsection changes, and clamp
+  // down if the current page no longer exists (e.g. after removing items).
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedSubsection?.id]);
+
+  useEffect(() => {
+    setCurrentPage((prev) => Math.min(prev, totalPages));
+  }, [totalPages]);
+
+  const paginatedItems = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return subsectionItems.slice(start, start + pageSize);
+  }, [subsectionItems, currentPage, pageSize]);
+
   const mappedQuestionIds = useMemo(() => new Set(subsectionItems.map((item) => item.questionId)), [subsectionItems]);
 
   const availableQuestions = useMemo(() => {
@@ -288,9 +406,14 @@ const QuestionMappingStep = ({ sections, blueprintItems,  versionId,  onAddQuest
     setIsAssignOpen(false);
   };
 
-  const handleAdd = (questionIds) => {
-    onAddQuestions(selectedSection.id, selectedSubsection.id, questionIds);
+  const handleAdd = (questions) => {
+    onAddQuestions(selectedSection.id, selectedSubsection.id, questions);
     setIsAssignOpen(false);
+  };
+
+  const handlePageSizeChange = (size) => {
+    setPageSize(size);
+    setCurrentPage(1);
   };
 
   if (sections.length === 0) {
@@ -340,7 +463,7 @@ const QuestionMappingStep = ({ sections, blueprintItems,  versionId,  onAddQuest
               <Info className="h-3.5 w-3.5 shrink-0" />
               <span>
                 <Hash className="mr-1 inline h-3 w-3" />
-                {subsectionItems.length} of {selectedSubsection?.questionLimit || 0} questions mapped for this subsection.
+                {subsectionItems.length} questions mapped for this subsection.
               </span>
             </div>
           </div>
@@ -356,22 +479,45 @@ const QuestionMappingStep = ({ sections, blueprintItems,  versionId,  onAddQuest
               </p>
             </div>
           ) : (
-            <div className="space-y-3">
-              {subsectionItems.map((item, index) => (
-                <BlueprintItemRow
-                  key={item.id}
-                  item={item}
-                  question={ALL_QUESTIONS_BY_ID[item.questionId]}
-                  index={index}
-                  total={subsectionItems.length}
-                  onMoveUp={() => onMoveItem(item.id, "up")}
-                  onMoveDown={() => onMoveItem(item.id, "down")}
-                  onFieldChange={onFieldChange}
-                  onToggleVisibility={onToggleVisibility}
-                  onRemove={onRequestRemove}
-                />
-              ))}
-            </div>
+            <>
+              <PaginationBar
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalCount={subsectionItems.length}
+                pageSize={pageSize}
+                onPageChange={setCurrentPage}
+                onPageSizeChange={handlePageSizeChange}
+              />
+
+              <div className="space-y-3">
+                {paginatedItems.map((item) => {
+                  // Global index/total (not page-local) so move up/down
+                  // and the disabled-at-edges logic stay correct across pages.
+                  const globalIndex = subsectionItems.findIndex((i) => i.id === item.id);
+                  return (
+                    <BlueprintItemRow
+                      key={item.id}
+                      item={item}
+                      question={ALL_QUESTIONS_BY_ID[item.questionId]}
+                      index={globalIndex}
+                      total={subsectionItems.length}
+                      onMoveUp={() => onMoveItem(item.id, "up")}
+                      onMoveDown={() => onMoveItem(item.id, "down")}
+                      onRemove={onRequestRemove}
+                    />
+                  );
+                })}
+              </div>
+
+              <PaginationBar
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalCount={subsectionItems.length}
+                pageSize={pageSize}
+                onPageChange={setCurrentPage}
+                onPageSizeChange={handlePageSizeChange}
+              />
+            </>
           )}
         </div>
       </div>
@@ -379,9 +525,10 @@ const QuestionMappingStep = ({ sections, blueprintItems,  versionId,  onAddQuest
       <AssignQuestionModal
         open={isAssignOpen && Boolean(selectedSubsection)}
         subsection={selectedSubsection}
-          versionId={versionId}  
+        versionId={versionId}
         versionGrade={null}
         availableQuestions={availableQuestions}
+        assignedQuestionIds={Array.from(mappedQuestionIds)}
         onClose={() => setIsAssignOpen(false)}
         onAdd={handleAdd}
       />

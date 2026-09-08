@@ -6,7 +6,20 @@ import {
   getQuestionsApi,
   getQuestionByIdApi,
   updateQuestionApi,
+  deleteQuestionApi,
 } from "../api/questionApi";
+
+// Display order applied to `questions` whenever the list is (re)built from
+// the API: Draft first (needs attention), then Published, then Archived.
+// Anything with an unrecognized/missing status sorts last.
+const QUESTION_STATUS_SORT_ORDER = { DRAFT: 0, PUBLISHED: 1, ARCHIVED: 2 };
+
+const sortQuestionsByStatus = (list) =>
+  [...list].sort((a, b) => {
+    const orderA = QUESTION_STATUS_SORT_ORDER[a.status] ?? 99;
+    const orderB = QUESTION_STATUS_SORT_ORDER[b.status] ?? 99;
+    return orderA - orderB;
+  });
 
 // ================= GENERATE QUESTION CODE =================
 
@@ -103,6 +116,31 @@ export const updateQuestion = createAsyncThunk(
   }
 );
 
+// ================= DELETE QUESTION =================
+
+export const deleteQuestion = createAsyncThunk(
+  "question/deleteQuestion",
+  async (questionId, { rejectWithValue }) => {
+    try {
+      const data = await deleteQuestionApi(questionId);
+
+      return {
+        questionId,
+        data,
+      };
+    } catch (error) {
+      console.error(
+        "DELETE QUESTION ERROR:",
+        error.response?.data || error
+      );
+
+      return rejectWithValue(
+        error.response?.data || "Failed to delete question"
+      );
+    }
+  }
+);
+
 // ================= SLICE =================
 
 const questionSlice = createSlice({
@@ -133,6 +171,11 @@ const questionSlice = createSlice({
     updateQuestionLoading: false,
     updateQuestionError: null,
     updatedQuestion: null,
+
+    // DELETE QUESTION
+deleteQuestionLoading: false,
+deleteQuestionError: null,
+deletedQuestion: null,
   },
 
   reducers: {
@@ -165,6 +208,12 @@ const questionSlice = createSlice({
       state.updateQuestionError = null;
       state.updatedQuestion = null;
     },
+
+    resetDeleteQuestionStatus: (state) => {
+  state.deleteQuestionLoading = false;
+  state.deleteQuestionError = null;
+  state.deletedQuestion = null;
+},
   },
 
   extraReducers: (builder) => {
@@ -222,7 +271,7 @@ const questionSlice = createSlice({
 
   const data = action.payload?.results?.data || [];
 
-  state.questions = data.map((item) => ({
+  const mapped = data.map((item) => ({
     // ================= BASIC =================
     id: item.id,
 
@@ -259,6 +308,12 @@ const questionSlice = createSlice({
     usages: item.usages || 0,
     createdBy: item.created_by || "-",
   }));
+
+  // Draft-first, then Published, then Archived — see
+  // sortQuestionsByStatus above. Keeping this here means every screen
+  // reading state.question.questions gets the same default ordering
+  // without re-sorting locally.
+  state.questions = sortQuestionsByStatus(mapped);
 
   // console.log("QUESTIONS FROM API:", data);
   // console.log("QUESTIONS FOR UI:", state.questions);
@@ -333,7 +388,31 @@ const questionSlice = createSlice({
       .addCase(updateQuestion.rejected, (state, action) => {
         state.updateQuestionLoading = false;
         state.updateQuestionError = action.payload;
-      });
+      })
+
+      // ================= DELETE QUESTION =================
+
+.addCase(deleteQuestion.pending, (state) => {
+  state.deleteQuestionLoading = true;
+  state.deleteQuestionError = null;
+  state.deletedQuestion = null;
+})
+
+.addCase(deleteQuestion.fulfilled, (state, action) => {
+  state.deleteQuestionLoading = false;
+  state.deletedQuestion = action.payload;
+
+  const deletedId = action.payload.questionId;
+
+  state.questions = state.questions.filter(
+    (question) => question.id !== deletedId
+  );
+})
+
+.addCase(deleteQuestion.rejected, (state, action) => {
+  state.deleteQuestionLoading = false;
+  state.deleteQuestionError = action.payload;
+})
   },
 });
 
@@ -343,7 +422,7 @@ export const {
   resetQuestions,
   resetUpdateQuestionStatus,
   resetSelectedQuestion,
+  resetDeleteQuestionStatus,
 } = questionSlice.actions;
 
 export default questionSlice.reducer;
-

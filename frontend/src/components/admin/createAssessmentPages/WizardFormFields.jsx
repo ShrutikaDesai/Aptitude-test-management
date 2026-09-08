@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { adminTheme } from "@/theme/adminTheme";
 
 // ---------------------------------------------------------------------------
 // Shared field primitives (label, text/date/select/number inputs, checkbox,
-// and the autocomplete-style assessment-name field). Every wizard step —
+// and the dropdown-style assessment-name field). Every wizard step —
 // General Info, Version Settings, Grade Mapping, Structure, etc. — pulls
 // these from here so styling stays consistent in one place.
 // ---------------------------------------------------------------------------
@@ -41,91 +41,130 @@ export const TextInput = ({ id, value, onChange, placeholder, disabled, required
   </div>
 );
 
-export const AssessmentNameField = ({ id, value, onChange, placeholder, required = false, error, options = [] }) => {
+// Dropdown-style Assessment Name field:
+// - Click the field to open a list of existing names (click one to select it).
+// - At the bottom of the same panel, type a new name and press Enter (or
+//   click "Add") to insert it into the list. This only ADDS the option —
+//   it does not select it. The user must then click it to actually choose it.
+export const AssessmentNameField = ({
+  id,
+  value,
+  onChange,
+  placeholder,
+  required = false,
+  error,
+  options = [],
+  onAddOption,
+}) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [inputValue, setInputValue] = useState(value || "");
+  const [newNameInput, setNewNameInput] = useState("");
+  const containerRef = useRef(null);
 
   useEffect(() => {
-    setInputValue(value || "");
-  }, [value]);
+    if (!isOpen) return;
 
-  const filteredOptions = options.filter((option) => {
-    const normalizedValue = String(value || "").trim().toLowerCase();
-    const normalizedOption = option.toLowerCase();
-
-    if (!normalizedValue) {
-      return true;
-    }
-
-    return normalizedOption.includes(normalizedValue);
-  });
-
-  const handleInputChange = (event) => {
-    const nextValue = event.target.value;
-    setInputValue(nextValue);
-    onChange(event);
-    setIsOpen(true);
-  };
-
-  const handleSelectOption = (option) => {
-    const syntheticEvent = {
-      target: {
-        value: option,
-      },
+    const handleClickOutside = (event) => {
+      if (containerRef.current && !containerRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
     };
 
-    setInputValue(option);
-    onChange(syntheticEvent);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isOpen]);
+
+  const handleSelectOption = (option) => {
+    onChange({ target: { value: option } });
     setIsOpen(false);
   };
 
+  // Adding a new name now also selects it immediately — the field shows it
+  // as the current value right after Enter/Add, no second click needed.
+  const handleAddNewName = () => {
+    const trimmed = newNameInput.trim();
+    if (!trimmed) return;
+
+    onAddOption?.(trimmed);
+    onChange({ target: { value: trimmed } });
+    setNewNameInput("");
+    setIsOpen(false);
+  };
+
+  const handleNewNameKeyDown = (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      handleAddNewName();
+    }
+  };
+
   return (
-    <div className="relative">
-      <input
+    <div className="relative" ref={containerRef}>
+      <button
+        type="button"
         id={id}
-        type="text"
-        value={value}
-        onChange={handleInputChange}
-        placeholder={placeholder}
-        required={required}
+        onClick={() => setIsOpen((prev) => !prev)}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
         className={cn(
-          "h-11 w-full pr-10 text-sm",
+          "flex h-11 w-full items-center justify-between text-sm",
           adminTheme.radius.md,
           adminTheme.border.default,
-          "border px-3 text-slate-900 placeholder:text-slate-400",
+          "border bg-white px-3 text-left",
+          value ? "text-slate-900" : "text-slate-400",
           "focus:outline-none focus:ring-2 focus:ring-slate-900/10",
           error && "border-red-300 focus:ring-red-200"
         )}
-        onFocus={() => setIsOpen(true)}
-        onBlur={() => {
-          window.setTimeout(() => setIsOpen(false), 120);
-        }}
-      />
-      <button
-        type="button"
-        onMouseDown={(event) => {
-          event.preventDefault();
-          setIsOpen((prev) => !prev);
-        }}
-        className="absolute inset-y-0 right-0 flex items-center justify-center px-3 text-slate-400 transition hover:text-slate-600"
-        aria-label="Toggle assessment name options"
       >
-        <ChevronDown className="h-4 w-4" />
+        <span className="truncate">{value || placeholder || "Select Assessment Name"}</span>
+        <ChevronDown
+          className={cn("h-4 w-4 shrink-0 text-slate-400 transition-transform", isOpen && "rotate-180")}
+        />
       </button>
 
-      {isOpen && filteredOptions.length > 0 && (
-        <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
-          {filteredOptions.map((option) => (
+      {isOpen && (
+        <div
+          role="listbox"
+          className="absolute z-20 mt-1 w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg"
+        >
+          <div className="max-h-48 overflow-y-auto py-1">
+            {options.length === 0 && (
+              <p className="px-3 py-2 text-xs text-slate-400">No names yet — add one below.</p>
+            )}
+            {options.map((option) => (
+              <button
+                key={option}
+                type="button"
+                role="option"
+                aria-selected={option === value}
+                onClick={() => handleSelectOption(option)}
+                className={cn(
+                  "flex min-h-9 w-full items-center px-3 py-2 text-left text-sm transition hover:bg-slate-50",
+                  option === value ? "bg-slate-50 font-medium text-slate-900" : "text-slate-700"
+                )}
+              >
+                <span className="truncate">{option}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2 border-t border-slate-100 bg-slate-50 p-2">
+            <input
+              type="text"
+              value={newNameInput}
+              onChange={(event) => setNewNameInput(event.target.value)}
+              onKeyDown={handleNewNameKeyDown}
+              placeholder="Type a new name and press Enter..."
+              className="h-8 flex-1 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+            />
             <button
-              key={option}
               type="button"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => handleSelectOption(option)}
-              className="flex min-h-9 w-full items-center justify-between px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+              onClick={handleAddNewName}
+              disabled={!newNameInput.trim()}
+              className="inline-flex h-8 shrink-0 items-center rounded-md bg-slate-900 px-2.5 text-xs font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              <span className="truncate">{option}</span>
+              Add
             </button>
-          ))}
+          </div>
         </div>
       )}
 
@@ -227,6 +266,3 @@ export const Checkbox = ({ id, checked, onChange, title, description }) => (
     </span>
   </label>
 );
-
-
-

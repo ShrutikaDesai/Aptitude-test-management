@@ -70,6 +70,16 @@ const EmptyState = ({ icon: Icon, title, subtitle }) => (
   </div>
 );
 
+// Shared loading row used by every tab's table area so the loading
+// treatment stays visually consistent across Grades / Sections /
+// Subsections / Tags.
+const TableLoadingState = ({ label }) => (
+  <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
+    <Loader2 className="mx-auto h-5 w-5 animate-spin" />
+    <p className="mt-3">{label}</p>
+  </div>
+);
+
 const ConfirmDeleteModal = ({ open, name, onCancel, onConfirm }) => {
   if (!open) return null;
 
@@ -122,7 +132,7 @@ const ConfirmDeleteModal = ({ open, name, onCancel, onConfirm }) => {
   );
 };
 
-const StatusToggleModal = ({ open, name, nextStatus, onCancel, onConfirm }) => {
+const StatusToggleModal = ({ open, name, nextStatus, onCancel, onConfirm, isSubmitting = false }) => {
   if (!open) return null;
 
   const activating = nextStatus === "ACTIVE";
@@ -162,14 +172,19 @@ const StatusToggleModal = ({ open, name, nextStatus, onCancel, onConfirm }) => {
         </div>
 
         <div className="mt-5 flex justify-end gap-2">
-          <button type="button" onClick={onCancel} className={adminTheme.actionButton.secondary}>
+          <button type="button" onClick={onCancel} disabled={isSubmitting} className={cn(adminTheme.actionButton.secondary, isSubmitting && "cursor-not-allowed opacity-60")}>
             Cancel
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-800"
+            disabled={isSubmitting}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-800",
+              isSubmitting && "cursor-not-allowed opacity-70 hover:bg-slate-900"
+            )}
           >
+            {isSubmitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             {activating ? "Activate" : "Deactivate"}
           </button>
         </div>
@@ -285,7 +300,7 @@ const useStatusToggle = (setRows) => {
 };
 
 // ---------------------------------------------------------------------------
-// TAB 1 — Grades  (unchanged)
+// TAB 1 — Grades
 // ---------------------------------------------------------------------------
 const GradesTab = () => {
   const [rows, setRows] = useState([]);
@@ -293,6 +308,7 @@ const GradesTab = () => {
   const [modal, setModal] = useState(null);
   const [deleteId, setDeleteId] = useState(null);
   const { pendingToggle, requestToggle, cancelToggle } = useStatusToggle(setRows);
+  const [isTogglingStatus, setIsTogglingStatus] = useState(false);
   const dispatch = useDispatch();
 
   const { grades, gradesLoading } = useSelector((state) => state.grade);
@@ -309,12 +325,14 @@ const GradesTab = () => {
     if (!pendingToggle) return;
 
     const { id, nextStatus } = pendingToggle;
+    setIsTogglingStatus(true);
     try {
       await dispatch(updateGrade({ id, payload: { status: nextStatus } })).unwrap();
-      dispatch(fetchGrades());
+      await dispatch(fetchGrades());
     } catch (error) {
       console.error("Failed to update grade status:", error);
     } finally {
+      setIsTogglingStatus(false);
       cancelToggle();
     }
   };
@@ -371,10 +389,7 @@ const GradesTab = () => {
 
       <div className="mt-4 overflow-x-auto">
         {gradesLoading ? (
-          <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
-            <Loader2 className="mx-auto h-5 w-5 animate-spin" />
-            <p className="mt-3">Loading grades…</p>
-          </div>
+          <TableLoadingState label="Loading grades…" />
         ) : paginated.length === 0 ? (
           <EmptyState icon={GraduationCap} title="No grades yet" subtitle="Add your first grade to get started." />
         ) : (
@@ -426,6 +441,7 @@ const GradesTab = () => {
         nextStatus={pendingToggle?.nextStatus}
         onCancel={cancelToggle}
         onConfirm={handleConfirmToggle}
+        isSubmitting={isTogglingStatus}
       />
 
       <TablePagination
@@ -445,7 +461,7 @@ const GradesTab = () => {
 };
 
 // ---------------------------------------------------------------------------
-// TAB 2 — Sections  (unchanged)
+// TAB 2 — Sections
 // ---------------------------------------------------------------------------
 const SectionsTab = () => {
   const [rows, setRows] = useState([]);
@@ -453,6 +469,7 @@ const SectionsTab = () => {
   const [modal, setModal] = useState(null);
   const [deleteId, setDeleteId] = useState(null);
   const { pendingToggle, requestToggle, cancelToggle } = useStatusToggle(setRows);
+  const [isTogglingStatus, setIsTogglingStatus] = useState(false);
   const dispatch = useDispatch();
 
   const { sections, sectionsLoading, loading } = useSelector((state) => state.section);
@@ -469,12 +486,14 @@ const SectionsTab = () => {
     if (!pendingToggle) return;
 
     const { id, nextStatus } = pendingToggle;
+    setIsTogglingStatus(true);
     try {
       await dispatch(updateSection({ id, payload: { status: nextStatus } })).unwrap();
-      dispatch(fetchSections());
+      await dispatch(fetchSections());
     } catch (error) {
       console.error("Failed to update section status:", error);
     } finally {
+      setIsTogglingStatus(false);
       cancelToggle();
     }
   };
@@ -552,10 +571,7 @@ const SectionsTab = () => {
 
       <div className="mt-4 overflow-x-auto">
         {sectionsLoading ? (
-          <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
-            <Loader2 className="mx-auto h-5 w-5 animate-spin" />
-            <p className="mt-3">Loading sections…</p>
-          </div>
+          <TableLoadingState label="Loading sections…" />
         ) : paginated.length === 0 ? (
           <EmptyState icon={LayoutGrid} title="No sections yet" subtitle="Add a section to get started." />
         ) : (
@@ -615,6 +631,7 @@ const SectionsTab = () => {
         nextStatus={pendingToggle?.nextStatus}
         onCancel={cancelToggle}
         onConfirm={handleConfirmToggle}
+        isSubmitting={isTogglingStatus}
       />
 
       <TablePagination
@@ -634,7 +651,10 @@ const SectionsTab = () => {
 };
 
 // ---------------------------------------------------------------------------
-// TAB 3 — Subsections  (unchanged)
+// TAB 3 — Subsections
+// (previously had no loading treatment at all — `subsectionsLoading` was
+// pulled from the selector but never read, so the table just looked
+// "empty" for a beat before rows appeared. Now matches Grades/Sections/Tags.)
 // ---------------------------------------------------------------------------
 const SubsectionsTab = () => {
   const [rows, setRows] = useState([]);
@@ -642,6 +662,7 @@ const SubsectionsTab = () => {
   const [modal, setModal] = useState(null);
   const [deleteId, setDeleteId] = useState(null);
   const { pendingToggle, requestToggle, cancelToggle } = useStatusToggle(setRows);
+  const [isTogglingStatus, setIsTogglingStatus] = useState(false);
 
   const dispatch = useDispatch();
 
@@ -659,12 +680,14 @@ const SubsectionsTab = () => {
     if (!pendingToggle) return;
 
     const { id, nextStatus } = pendingToggle;
+    setIsTogglingStatus(true);
     try {
       await dispatch(updateSubsection({ id, payload: { status: nextStatus } })).unwrap();
-      dispatch(fetchSubsections());
+      await dispatch(fetchSubsections());
     } catch (error) {
       console.error("Failed to update subsection status:", error);
     } finally {
+      setIsTogglingStatus(false);
       cancelToggle();
     }
   };
@@ -749,7 +772,9 @@ const SubsectionsTab = () => {
       <Toolbar query={query} setQuery={setQuery} placeholder="Search subsections…" onAdd={openAdd} addLabel="Add Subsection" />
 
       <div className="mt-4 overflow-x-auto">
-        {paginated.length === 0 ? (
+        {subsectionsLoading ? (
+          <TableLoadingState label="Loading subsections…" />
+        ) : paginated.length === 0 ? (
           <EmptyState icon={ListTree} title="No subsections yet" subtitle="Add a subsection to get started." />
         ) : (
           <table className="w-full min-w-[720px] border-collapse">
@@ -806,6 +831,7 @@ const SubsectionsTab = () => {
         nextStatus={pendingToggle?.nextStatus}
         onCancel={cancelToggle}
         onConfirm={handleConfirmToggle}
+        isSubmitting={isTogglingStatus}
       />
 
       <TablePagination
@@ -825,8 +851,7 @@ const SubsectionsTab = () => {
 };
 
 // ---------------------------------------------------------------------------
-// TAB 4 — Tags  (new — mirrors SectionsTab's CRUD pattern, minus the
-// instructions / mandatory fields since a tag is just a labeled entity)
+// TAB 4 — Tags
 // ---------------------------------------------------------------------------
 const TagsTab = () => {
   const [rows, setRows] = useState([]);
@@ -912,10 +937,7 @@ const TagsTab = () => {
 
       <div className="mt-4 overflow-x-auto">
         {tagsLoading ? (
-          <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
-            <Loader2 className="mx-auto h-5 w-5 animate-spin" />
-            <p className="mt-3">Loading tags…</p>
-          </div>
+          <TableLoadingState label="Loading tags…" />
         ) : paginated.length === 0 ? (
           <EmptyState icon={TagsIcon} title="No tags yet" subtitle="Add a tag to get started." />
         ) : (
@@ -988,7 +1010,7 @@ const TopBar = () => (
 );
 
 // ---------------------------------------------------------------------------
-// Page shell — Tags tab added to TABS
+// Page shell
 // ---------------------------------------------------------------------------
 const TABS = [
   { key: "grades", label: "Grades", icon: GraduationCap, Component: GradesTab },

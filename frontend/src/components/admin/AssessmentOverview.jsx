@@ -1,4 +1,4 @@
-  import { useMemo, useState, useCallback, useEffect } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
   import { useNavigate } from "react-router-dom";
   import {
     Plus,
@@ -15,6 +15,7 @@
     CheckCircle2,
     X,
     Inbox,
+      Loader2,
   } from "lucide-react";
   import { cn } from "@/lib/utils";
   import { adminTheme } from "@/theme/adminTheme";
@@ -38,7 +39,7 @@
   };
 
   const ASSESSMENT_LIST_TABS = ["All", "Published", "Draft", "Archived"];
-  const PAGE_SIZE_OPTIONS = [5, 10, 25];
+  const PAGE_SIZE_OPTIONS = [5, 10, 20, 50, 100];
 
   // ---- Small building blocks --------------------------------------------------
 
@@ -170,7 +171,7 @@
   // Single row in the assessments list. Drafts get a Pencil ("Continue
   // Editing") action since they route back into the CreateAssessment wizard;
   // published/archived versions get a read-only Eye ("View") action instead.
-  const AssessmentListRow = ({ assessment, onOpen, selected, onToggleSelect }) => {
+  const AssessmentListRow = ({ assessment, serialNumber, onOpen, selected, onToggleSelect }) => {
     const statusMeta = ASSESSMENT_STATUS_META[assessment.status];
     const isDraft = assessment.status === "DRAFT";
 
@@ -179,6 +180,7 @@
         <td className={cn(adminTheme.table.cell, "w-10")}>
           <RowCheckbox checked={selected} onChange={() => onToggleSelect(assessment.id)} label={`Select ${assessment.name}`} />
         </td>
+        <td className={cn(adminTheme.table.cellMuted, "whitespace-nowrap font-mono text-xs")}>{serialNumber}</td>
         <td className={cn(adminTheme.table.cell, "font-medium text-slate-900")}>{assessment.name}</td>
         <td className={adminTheme.table.cell}>
           <span className={cn(adminTheme.badge.neutral, "uppercase")}>
@@ -288,18 +290,26 @@
       dispatch(fetchAssessmentListSlice());
     }, [dispatch]);
 
-    const filtered = useMemo(() => {
-      switch (tab) {
-        case "Published":
-          return assessments.filter((item) => item.status === "PUBLISHED");
-        case "Draft":
-          return assessments.filter((item) => item.status === "DRAFT");
-        case "Archived":
-          return assessments.filter((item) => item.status === "ARCHIVED");
-        default:
-          return assessments;
-      }
-    }, [assessments, tab]);
+   const STATUS_SORT_ORDER = { DRAFT: 0, PUBLISHED: 1, ARCHIVED: 2 };
+
+const filtered = useMemo(() => {
+  switch (tab) {
+    case "Published":
+      return assessments.filter((item) => item.status === "PUBLISHED");
+    case "Draft":
+      return assessments.filter((item) => item.status === "DRAFT");
+    case "Archived":
+      return assessments.filter((item) => item.status === "ARCHIVED");
+    default:
+      // "All" tab: Draft first, then Published, then Archived. Anything
+      // with an unrecognized status sorts last rather than crashing.
+      return [...assessments].sort((a, b) => {
+        const orderA = STATUS_SORT_ORDER[a.status] ?? 99;
+        const orderB = STATUS_SORT_ORDER[b.status] ?? 99;
+        return orderA - orderB;
+      });
+  }
+}, [assessments, tab]);
 
     const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
     const safePage = Math.min(page, pageCount);
@@ -490,7 +500,7 @@
         />
 
         <div className="mt-4 overflow-x-auto">
-          <table className="w-full min-w-[760px] border-collapse">
+          <table className="w-full min-w-[820px] border-collapse">
             <thead>
               <tr>
                 <th className={cn(adminTheme.table.headerCell, "w-10")}>
@@ -501,6 +511,7 @@
                     label="Select all rows on this page"
                   />
                 </th>
+                <th className={adminTheme.table.headerCell}>Sr.No</th>
                 <th className={adminTheme.table.headerCell}>Name</th>
                 <th className={adminTheme.table.headerCell}>Type</th>
                 <th className={adminTheme.table.headerCell}>Version</th>
@@ -510,29 +521,53 @@
                 <th className={cn(adminTheme.table.headerCell, "text-right")}>Action</th>
               </tr>
             </thead>
-            <tbody>
-              {paginated.length === 0 ? (
-                <tr>
-                  <td colSpan={8}>
-                    <div className="flex flex-col items-center justify-center py-16 text-center">
-                      <Inbox className="h-12 w-12 text-slate-300" />
-                      <h3 className="mt-4 text-base font-semibold text-slate-700">{emptyState[tab].title}</h3>
-                      <p className="mt-2 max-w-sm text-sm text-slate-500">{emptyState[tab].description}</p>
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                paginated.map((assessment) => (
-                  <AssessmentListRow
-                    key={assessment.id}
-                    assessment={assessment}
-                    selected={selectedIds.has(assessment.id)}
-                    onToggleSelect={handleToggleSelect}
-                    onOpen={handleOpen}
-                  />
-                ))
-              )}
-            </tbody>
+          
+<tbody>
+  {listLoading ? (
+    <tr>
+      <td colSpan={9}>
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+        <Loader2 className="h-8 w-8 animate-spin text-black" />
+          <p className="mt-3 text-sm font-medium text-slate-600">
+            Loading assessments...
+          </p>
+          <p className="mt-1 text-xs text-slate-400">
+            Please wait while we fetch the assessment list.
+          </p>
+        </div>
+      </td>
+    </tr>
+  ) : paginated.length === 0 ? (
+    <tr>
+      <td colSpan={9}>
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <Inbox className="h-12 w-12 text-slate-300" />
+
+          <h3 className="mt-4 text-base font-semibold text-slate-700">
+            {emptyState[tab].title}
+          </h3>
+
+          <p className="mt-2 max-w-sm text-sm text-slate-500">
+            {emptyState[tab].description}
+          </p>
+        </div>
+      </td>
+    </tr>
+  ) : (
+    paginated.map((assessment, index) => (
+      <AssessmentListRow
+        key={assessment.id}
+        assessment={assessment}
+        serialNumber={(safePage - 1) * pageSize + index + 1}
+        selected={selectedIds.has(assessment.id)}
+        onToggleSelect={handleToggleSelect}
+        onOpen={handleOpen}
+      />
+    ))
+  )}
+</tbody>
+
+
           </table>
         </div>
 

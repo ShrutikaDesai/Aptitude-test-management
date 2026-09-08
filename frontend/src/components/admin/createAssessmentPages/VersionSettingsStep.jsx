@@ -92,16 +92,18 @@ const VersionSettingsStep = ({
           onChange={(e) => onFieldChange("versionNumber", e.target.value)}
           placeholder="V1"
           error={validationErrors["version.version_number"]}
+          disabled
         />
       </div>
 
-      <div>
-        <FieldLabel>Version Name</FieldLabel>
+   <div>
+        <FieldLabel required>Version Name</FieldLabel>
         <TextInput
           id="versionName"
           value={form.versionName}
           onChange={(e) => onFieldChange("versionName", e.target.value)}
           placeholder="2026 Edition"
+          error={validationErrors["version.version_name"]}
         />
       </div>
 
@@ -194,13 +196,7 @@ const VersionSettingsStep = ({
             title="Randomize sections"
             description="Shuffle section order per candidate."
           />
-          <Checkbox
-            id="randomizeQuestions"
-            checked={form.randomizeQuestions}
-            onChange={(e) => onFieldChange("randomizeQuestions", e.target.checked)}
-            title="Randomize questions"
-            description="Shuffle question order within each section."
-          />
+        
         </div>
       </div>
 

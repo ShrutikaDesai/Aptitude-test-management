@@ -22,6 +22,7 @@ import {
   X,
   User,
   LogOut,
+  BookOpen,
 
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -53,6 +54,7 @@ const NAV_GROUPS = [
       { label: "Question Library", to: "/s-admin/question-library", icon: ClipboardList, },
       //  { label: "Question Mapping", to: "/s-admin/question-mapping",icon: GitBranch,},
       { label: "Assessment Structure", to: "/s-admin/assessment-structure", icon: Network, },
+      { label: "Interpretation", to: "/s-admin/interpretation-overview", icon: BookOpen },
     ],
   },
   // {
@@ -79,6 +81,7 @@ const BREADCRUMB_LABELS = {
   "question-bank-repository": "Question Bank Repository",
   "question-library": "Question Library",
   "question-mapping": "Question Mapping",
+    "interpretation": "Interpretation",
   "iam": "Identity & Access",
   users: "Users",
   roles: "Roles",

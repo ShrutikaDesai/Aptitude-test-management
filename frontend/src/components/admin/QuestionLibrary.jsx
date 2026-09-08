@@ -19,11 +19,12 @@ import {
     AlertTriangle,
     FileClock,
     SlidersHorizontal,
+    Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { adminTheme } from "@/theme/adminTheme";
 import { useDispatch, useSelector } from "react-redux";
-import { getQuestions } from "../../slices/questionSlice";
+import { getQuestions , deleteQuestion} from "../../slices/questionSlice";
 import { fetchGrades } from "../../slices/gradeSlice";
 import Skeleton from "../ui/Skeleton";
 
@@ -32,7 +33,8 @@ import Skeleton from "../ui/Skeleton";
  * The table CreateQuestion's "Back to Library" / publish actions return to.
  * Rows are one per `questions` row (id = question_code). Status lives on the
  * question itself: DRAFT = saved but not published (via the wizard's
- * "Discard"/step-save flow), PUBLISHED = live in the shared bank.
+ * "Discard"/step-save flow), PUBLISHED = live in the shared bank, ARCHIVED =
+ * moved out of active use.
  *
  * Responsive: renders a normal table at md+ widths and a stacked card list
  * below md, since a wide table is unusable on phone-sized viewports.
@@ -49,12 +51,18 @@ const DIFFICULTY_META = {
 const STATUS_META = {
     PUBLISHED: { label: "Published", badge: "bg-emerald-50 text-emerald-700" },
     DRAFT: { label: "Draft", badge: "bg-amber-50 text-amber-700" },
+    ARCHIVED: { label: "Archived", badge: "bg-slate-200 text-slate-600" },
 };
 
-const TABS = ["All", "Published", "Draft"];
-const PAGE_SIZE_OPTIONS = [5, 10, 25];
+const TABS = ["All", "Published", "Draft", "Archived"];
+const   PAGE_SIZE_OPTIONS = [5, 10, 20, 50, 100];
 
 const QUESTION_TYPE_LABEL = (type) => String(type ?? "").replace(/_/g, " ");
+
+// Real API rows use `question_status`; locally-mutated rows (bulk actions,
+// duplicate) use `status`. Read through both so filtering/badges work
+// regardless of which shape a given row came from.
+const getQuestionStatus = (question) => question?.status ?? question?.question_status ?? null;
 
 const gradeMatchesFilter = (questionGrade, selectedGrade) => {
     const selected = String(selectedGrade ?? "").trim();
@@ -164,9 +172,11 @@ const FILTER_FIELD_META = {
     grade: { label: "Grade", placeholder: "Filter by grade" },
 };
 
-const FilterSelect = ({ field, value, options, onChange }) => {
+const FilterSelect = ({ field, value, options, onChange, isLoading = false, error = null }) => {
     const meta = FILTER_FIELD_META[field];
     const hasValue = value !== "";
+    const disabled = isLoading || (!isLoading && !error && options.length === 0);
+
     return (
         <div className="flex flex-col gap-1">
             <label htmlFor={`filter-${field}`} className="text-xs font-medium text-slate-500">
@@ -177,13 +187,15 @@ const FilterSelect = ({ field, value, options, onChange }) => {
                     id={`filter-${field}`}
                     value={value}
                     onChange={(e) => onChange(field, e.target.value)}
+                    disabled={disabled}
                     className={cn(
                         "h-9 w-full appearance-none rounded-md border border-slate-200 bg-white pl-2.5 text-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400 sm:min-w-[160px]",
                         hasValue ? "pr-14 text-slate-900" : "pr-8 text-slate-500",
+                        disabled && "cursor-not-allowed bg-slate-50 text-slate-400"
                     )}
                 >
                     <option value="" disabled hidden>
-                        {meta.placeholder}
+                        {isLoading ? "Loading…" : error ? "Couldn't load grades" : meta.placeholder}
                     </option>
                     {options.map((opt) => (
                         <option key={opt} value={opt}>
@@ -191,7 +203,7 @@ const FilterSelect = ({ field, value, options, onChange }) => {
                         </option>
                     ))}
                 </select>
-                {hasValue && (
+                {hasValue && !isLoading && (
                     <button
                         type="button"
                         onClick={() => onChange(field, "")}
@@ -201,15 +213,29 @@ const FilterSelect = ({ field, value, options, onChange }) => {
                         <X className="h-3.5 w-3.5" />
                     </button>
                 )}
-                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                {isLoading ? (
+                    <Loader2 className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-slate-400" />
+                ) : (
+                    <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                )}
             </div>
+            {error && !isLoading && (
+                <p className="text-[11px] text-red-500">Couldn't load grade options.</p>
+            )}
         </div>
     );
 };
 
-const FilterBar = ({ filters, search, onSearchChange, onFilterChange, gradeOptions }) => (
+const FilterBar = ({ filters, search, onSearchChange, onFilterChange, gradeOptions, gradeOptionsLoading, gradeOptionsError }) => (
     <div className="mt-4 grid grid-cols-1 gap-3 rounded-lg border border-slate-100 bg-slate-50/60 p-3 sm:flex sm:flex-wrap sm:items-end">
-        <FilterSelect field="grade" value={filters.grade} options={gradeOptions} onChange={onFilterChange} />
+        <FilterSelect
+            field="grade"
+            value={filters.grade}
+            options={gradeOptions}
+            onChange={onFilterChange}
+            isLoading={gradeOptionsLoading}
+            error={gradeOptionsError}
+        />
         <div className="flex flex-col gap-1">
             <label htmlFor="question-search" className="text-xs font-medium text-slate-500">
                 Search
@@ -262,7 +288,7 @@ const BULK_ACTION_COPY = {
     },
 };
 
-const ConfirmBulkActionDialog = ({ action, count, onConfirm, onCancel }) => {
+const ConfirmBulkActionDialog = ({ action, count, onConfirm, onCancel, isSubmitting = false }) => {
     if (!action) return null;
     const copy = BULK_ACTION_COPY[action];
     return (
@@ -279,17 +305,20 @@ const ConfirmBulkActionDialog = ({ action, count, onConfirm, onCancel }) => {
                 </p>
                 <p className="mt-2 text-sm text-slate-500">{copy.body(count)}</p>
                 <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                    <button type="button" onClick={onCancel} className={cn(adminTheme.actionButton.secondary, "w-full justify-center sm:w-auto")}>
+                    <button type="button" onClick={onCancel} disabled={isSubmitting} className={cn(adminTheme.actionButton.secondary, "w-full justify-center sm:w-auto", isSubmitting && "cursor-not-allowed opacity-60")}>
                         Cancel
                     </button>
                     <button
                         type="button"
                         onClick={onConfirm}
+                        disabled={isSubmitting}
                         className={cn(
                             "inline-flex w-full items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold text-white sm:w-auto",
-                            copy.tone === "danger" ? "bg-red-600 hover:bg-red-700" : "bg-indigo-600 hover:bg-indigo-700"
+                            copy.tone === "danger" ? "bg-red-600 hover:bg-red-700" : "bg-indigo-600 hover:bg-indigo-700",
+                            isSubmitting && "cursor-not-allowed opacity-70"
                         )}
                     >
+                        {isSubmitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                         {copy.confirmLabel}
                     </button>
                 </div>
@@ -298,7 +327,7 @@ const ConfirmBulkActionDialog = ({ action, count, onConfirm, onCancel }) => {
     );
 };
 
-const DeleteQuestionDialog = ({ question, onConfirm, onCancel }) => {
+const DeleteQuestionDialog = ({ question, onConfirm, onCancel, isSubmitting = false }) => {
     if (!question) return null;
 
     return (
@@ -317,14 +346,19 @@ const DeleteQuestionDialog = ({ question, onConfirm, onCancel }) => {
                     This will permanently remove <span className="font-semibold text-slate-700">{question.id}</span> from the library.
                 </p>
                 <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                    <button type="button" onClick={onCancel} className={cn(adminTheme.actionButton.secondary, "w-full justify-center sm:w-auto")}>
+                    <button type="button" onClick={onCancel} disabled={isSubmitting} className={cn(adminTheme.actionButton.secondary, "w-full justify-center sm:w-auto", isSubmitting && "cursor-not-allowed opacity-60")}>
                         Cancel
                     </button>
                     <button
                         type="button"
                         onClick={onConfirm}
-                        className="inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700 sm:w-auto"
+                        disabled={isSubmitting}
+                        className={cn(
+                            "inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700 sm:w-auto",
+                            isSubmitting && "cursor-not-allowed opacity-70"
+                        )}
                     >
+                        {isSubmitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                         Delete
                     </button>
                 </div>
@@ -400,81 +434,87 @@ const EditTagsDialog = ({ open, count, onApply, onCancel }) => {
 
 // ---- Table row (md+) --------------------------------------------------
 
-const QuestionRow = ({ question, selected, serialNumber, onToggleSelect, onView, onEdit, onDuplicate, onDelete }) => (
-    <tr className={cn(adminTheme.table.row, selected && "bg-indigo-50/40")}>
-        <td className={cn(adminTheme.table.cell, "w-10")}>
-            <RowCheckbox checked={selected} onChange={() => onToggleSelect(question.id)} label={`Select ${question.id}`} />
-        </td>
-        <td className={cn(adminTheme.table.cellMuted, "whitespace-nowrap font-mono text-xs")}>{serialNumber}</td>
-        <td className={cn(adminTheme.table.cell, "max-w-sm min-w-0")}>
-            <div className="flex items-start gap-3">
-                {getQuestionThumbnailUrl(question) ? (
-                    <img
-                        src={getQuestionThumbnailUrl(question)}
-                        alt=""
-                        aria-hidden="true"
-                        className="h-14 w-14 flex-none rounded-md border border-slate-200 object-cover"
-                    />
-                ) : null}
-                <div className="min-w-0">
-                    <p className="truncate font-semibold text-slate-900" title={stripHtml(question.prompt)}>
-                        {stripHtml(question.prompt)}
-                    </p>
-                    <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-400">
-                        {question.usages > 0 && (
-                            <>
-                                <Zap className="h-3 w-3" />
-                                {(question.usages / 1000).toFixed(1)}k usages
-                                <span className="text-slate-300">•</span>
-                            </>
-                        )}
-                        Created by {question.createdBy}
-                    </p>
+const QuestionRow = ({ question, selected, serialNumber, onToggleSelect, onView, onEdit, onDuplicate, onDelete }) => {
+    const questionStatus = getQuestionStatus(question);
+    return (
+        <tr className={cn(adminTheme.table.row, selected && "bg-indigo-50/40")}>
+            <td className={cn(adminTheme.table.cell, "w-10")}>
+                <RowCheckbox checked={selected} onChange={() => onToggleSelect(question.id)} label={`Select ${question.id}`} />
+            </td>
+            <td className={cn(adminTheme.table.cellMuted, "whitespace-nowrap font-mono text-xs")}>{serialNumber}</td>
+            <td className={cn(adminTheme.table.cell, "max-w-sm min-w-0")}>
+                <div className="flex items-start gap-3">
+                    {getQuestionThumbnailUrl(question) ? (
+                        <img
+                            src={getQuestionThumbnailUrl(question)}
+                            alt=""
+                            aria-hidden="true"
+                            className="h-14 w-14 flex-none rounded-md border border-slate-200 object-cover"
+                        />
+                    ) : null}
+                    <div className="min-w-0">
+                        <p className="truncate font-semibold text-slate-900" title={stripHtml(question.prompt)}>
+                            {stripHtml(question.prompt)}
+                        </p>
+                        <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-400">
+                            {question.usages > 0 && (
+                                <>
+                                    <Zap className="h-3 w-3" />
+                                    {(question.usages / 1000).toFixed(1)}k usages
+                                    <span className="text-slate-300">•</span>
+                                </>
+                            )}
+                            Created by {question.createdBy}
+                        </p>
+                    </div>
                 </div>
-            </div>
-        </td>
-        <td className={adminTheme.table.cell}>
-            <span className={cn(adminTheme.badge.neutral, "uppercase")}>{QUESTION_TYPE_LABEL(question.type)}</span>
-        </td>
-        <td className={cn(adminTheme.table.cellMuted, "text-sm")}>
-            <p>{question.grade}</p>
-        </td>
-        <td className={adminTheme.table.cell}>
-            <DifficultyBadge level={question.difficulty} />
-        </td>
-        <td className={cn(adminTheme.table.cellMuted, "whitespace-nowrap")}>{(() => {
-            const modified = formatModified(question.modifiedAt);
-            return (
-                <div className="flex flex-col gap-0.5 text-sm">
-                    <span>{modified.date}</span>
-                    <span className="text-slate-500">{modified.time}</span>
-                </div>
-            );
-        })()}</td>
-        <td className={adminTheme.table.cell}>
-            <StatusBadge status={question.status} />
-        </td>
-        <td className={cn(adminTheme.table.cell, "text-right")}>
-            <div className="flex items-center justify-end gap-1">
-                <button type="button" onClick={() => onView(question)} title="View" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-900">
-                    <Eye className="h-4 w-4" />
-                </button>
-                {question.status === "DRAFT" && (
-                    <button type="button" onClick={() => onEdit(question)} title="Edit" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-900">
-                        <Pencil className="h-4 w-4" />
-                    </button>
-                )}
-                <button type="button" onClick={() => onDelete(question)} title="Delete" className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600">
-                    <Trash2 className="h-4 w-4" />
-                </button>
-            </div>
-        </td>
-    </tr>
-);
+            </td>
+            <td className={adminTheme.table.cell}>
+                <span className={cn(adminTheme.badge.neutral, "uppercase")}>{QUESTION_TYPE_LABEL(question.type)}</span>
+            </td>
+            <td className={cn(adminTheme.table.cellMuted, "text-sm")}>
+                <p>{question.grade}</p>
+            </td>
+            <td className={adminTheme.table.cell}>
+                <DifficultyBadge level={question.difficulty} />
+            </td>
+            <td className={cn(adminTheme.table.cellMuted, "whitespace-nowrap")}>{(() => {
+                const modified = formatModified(question.modifiedAt);
+                return (
+                    <div className="flex flex-col gap-0.5 text-sm">
+                        <span>{modified.date}</span>
+                        <span className="text-slate-500">{modified.time}</span>
+                    </div>
+                );
+            })()}</td>
+            <td className={adminTheme.table.cell}>
+                <StatusBadge status={questionStatus} />
+            </td>
+         <td className={cn(adminTheme.table.cell, "text-right")}>
+    <div className="flex items-center justify-end gap-1">
+        <button type="button" onClick={() => onView(question)} title="View" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-900">
+            <Eye className="h-4 w-4" />
+        </button>
+        {questionStatus === "DRAFT" && (
+            <button type="button" onClick={() => onEdit(question)} title="Edit" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-900">
+                <Pencil className="h-4 w-4" />
+            </button>
+        )}
+        {questionStatus !== "ARCHIVED" && (
+            <button type="button" onClick={() => onDelete(question)} title="Delete" className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600">
+                <Trash2 className="h-4 w-4" />
+            </button>
+        )}
+    </div>
+</td>
+        </tr>
+    );
+};
 
 // ---- Card row (below md) ------------------------------------------------
 
 const QuestionCard = ({ question, selected, serialNumber, onToggleSelect, onView, onEdit, onDelete }) => {
+    const questionStatus = getQuestionStatus(question);
     const modified = formatModified(question.modifiedAt);
     const thumb = getQuestionThumbnailUrl(question);
     return (
@@ -497,7 +537,7 @@ const QuestionCard = ({ question, selected, serialNumber, onToggleSelect, onView
                 <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
                         <span className="font-mono text-[11px] text-slate-400">#{serialNumber}</span>
-                        <StatusBadge status={question.status} />
+                        <StatusBadge status={questionStatus} />
                     </div>
                     <p className="mt-1 line-clamp-2 font-semibold text-slate-900" title={stripHtml(question.prompt)}>
                         {stripHtml(question.prompt)}
@@ -524,19 +564,21 @@ const QuestionCard = ({ question, selected, serialNumber, onToggleSelect, onView
                             {modified.date}
                             {modified.time ? ` · ${modified.time}` : ""}
                         </span>
-                        <div className="flex items-center gap-1">
-                            <button type="button" onClick={() => onView(question)} title="View" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-900">
-                                <Eye className="h-4 w-4" />
-                            </button>
-                            {question.status === "DRAFT" && (
-                                <button type="button" onClick={() => onEdit(question)} title="Edit" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-900">
-                                    <Pencil className="h-4 w-4" />
-                                </button>
-                            )}
-                            <button type="button" onClick={() => onDelete(question)} title="Delete" className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600">
-                                <Trash2 className="h-4 w-4" />
-                            </button>
-                        </div>
+                       <div className="flex items-center gap-1">
+    <button type="button" onClick={() => onView(question)} title="View" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-900">
+        <Eye className="h-4 w-4" />
+    </button>
+    {questionStatus === "DRAFT" && (
+        <button type="button" onClick={() => onEdit(question)} title="Edit" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-900">
+            <Pencil className="h-4 w-4" />
+        </button>
+    )}
+    {questionStatus !== "ARCHIVED" && (
+        <button type="button" onClick={() => onDelete(question)} title="Delete" className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600">
+            <Trash2 className="h-4 w-4" />
+        </button>
+    )}
+</div>
                     </div>
                 </div>
             </div>
@@ -617,7 +659,7 @@ const QuestionLibrary = () => {
     const navigate = useNavigate();
     const dispatch = useDispatch();
 
-    const { questions, getQuestionsLoading, getQuestionsError } = useSelector((state) => state.question);
+const {questions,getQuestionsLoading,getQuestionsError,deleteQuestionLoading,deleteQuestionError,} = useSelector((state) => state.question);
     const { grades, gradesLoading, gradesError } = useSelector((state) => state.grade);
 
     const [displayQuestions, setDisplayQuestions] = useState([]);
@@ -628,7 +670,9 @@ const QuestionLibrary = () => {
     const [pageSize, setPageSize] = useState(10);
     const [selectedIds, setSelectedIds] = useState(() => new Set());
     const [pendingAction, setPendingAction] = useState(null); // null | "publish" | "archive" | "delete"
+    const [isBulkActionSubmitting, setIsBulkActionSubmitting] = useState(false);
     const [pendingDeleteQuestion, setPendingDeleteQuestion] = useState(null);
+    const [isDeleteSubmitting, setIsDeleteSubmitting] = useState(false);
     const [isTagDialogOpen, setIsTagDialogOpen] = useState(false);
 
     // Keep displayQuestions in sync with the API-backed questions, but be
@@ -674,9 +718,6 @@ const QuestionLibrary = () => {
         setPage(1);
     }, []);
 
-    const filterLoading = gradesLoading;
-    const filterError = gradesError;
-
     const handleSearchChange = useCallback((value) => {
         setSearch(value);
         setPage(1);
@@ -689,7 +730,7 @@ const QuestionLibrary = () => {
         let rows = displayQuestions;
 
         if (tab !== "All") {
-            rows = rows.filter((q) => STATUS_META[q.status]?.label === tab);
+            rows = rows.filter((q) => STATUS_META[getQuestionStatus(q)]?.label === tab);
         }
         if (filters.grade !== "") {
             rows = rows.filter((q) => gradeMatchesFilter(q.grade, filters.grade));
@@ -716,7 +757,10 @@ const QuestionLibrary = () => {
     const rangeStart = filtered.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
     const rangeEnd = Math.min(safePage * pageSize, filtered.length);
 
-    const draftCount = useMemo(() => displayQuestions.filter((q) => q.status === "DRAFT").length, [displayQuestions]);
+    const draftCount = useMemo(
+        () => displayQuestions.filter((q) => getQuestionStatus(q) === "DRAFT").length,
+        [displayQuestions]
+    );
 
     const activeFilterOrSearchCount = activeFilterCount + (search.trim() ? 1 : 0);
 
@@ -753,18 +797,27 @@ const QuestionLibrary = () => {
         setPage(1);
     }, []);
 
-    const handleConfirmBulkAction = useCallback(() => {
-        if (pendingAction === "publish") {
-            setDisplayQuestions((prev) =>
-                prev.map((q) => (selectedIds.has(q.id) ? { ...q, status: "PUBLISHED", modifiedAt: "Just now" } : q))
-            );
-        } else if (pendingAction === "archive") {
-            setDisplayQuestions((prev) => prev.filter((q) => !selectedIds.has(q.id)));
-        } else if (pendingAction === "delete") {
-            setDisplayQuestions((prev) => prev.filter((q) => !selectedIds.has(q.id)));
+    const handleConfirmBulkAction = useCallback(async () => {
+        setIsBulkActionSubmitting(true);
+        try {
+            if (pendingAction === "publish") {
+                setDisplayQuestions((prev) =>
+                    prev.map((q) => (selectedIds.has(q.id) ? { ...q, status: "PUBLISHED", modifiedAt: "Just now" } : q))
+                );
+            } else if (pendingAction === "archive") {
+                // Mark as archived (rather than removing the row) so the
+                // question still shows up under the Archived tab.
+                setDisplayQuestions((prev) =>
+                    prev.map((q) => (selectedIds.has(q.id) ? { ...q, status: "ARCHIVED", modifiedAt: "Just now" } : q))
+                );
+            } else if (pendingAction === "delete") {
+                setDisplayQuestions((prev) => prev.filter((q) => !selectedIds.has(q.id)));
+            }
+            setSelectedIds(new Set());
+            setPendingAction(null);
+        } finally {
+            setIsBulkActionSubmitting(false);
         }
-        setSelectedIds(new Set());
-        setPendingAction(null);
     }, [pendingAction, selectedIds]);
 
     const handleApplyTags = useCallback(
@@ -776,11 +829,30 @@ const QuestionLibrary = () => {
         [selectedIds]
     );
 
-    const handleConfirmDeleteRow = useCallback(() => {
-        if (!pendingDeleteQuestion) return;
-        setDisplayQuestions((prev) => prev.filter((q) => q.id !== pendingDeleteQuestion.id));
+ const handleConfirmDeleteRow = useCallback(async () => {
+    if (!pendingDeleteQuestion) return;
+
+    setIsDeleteSubmitting(true);
+
+    try {
+        await dispatch(
+            deleteQuestion(pendingDeleteQuestion.id)
+        ).unwrap();
+
+        // Remove from local UI immediately after successful API delete
+        setDisplayQuestions((prev) =>
+            prev.filter(
+                (q) => q.id !== pendingDeleteQuestion.id
+            )
+        );
+
         setPendingDeleteQuestion(null);
-    }, [pendingDeleteQuestion]);
+    } catch (error) {
+        console.error("Failed to delete question:", error);
+    } finally {
+        setIsDeleteSubmitting(false);
+    }
+}, [dispatch, pendingDeleteQuestion]);
 
     const handleView = (question) => navigate(`/s-admin/question-library/${question.id}`);
     const handleEdit = (question) => navigate(`/s-admin/edit-question/${question.id}`);
@@ -807,7 +879,7 @@ const QuestionLibrary = () => {
                                 const count =
                                     option === "All"
                                         ? displayQuestions.length
-                                        : displayQuestions.filter((q) => STATUS_META[q.status]?.label === option).length;
+                                        : displayQuestions.filter((q) => STATUS_META[getQuestionStatus(q)]?.label === option).length;
                                 return (
                                     <button
                                         key={option}
@@ -819,6 +891,7 @@ const QuestionLibrary = () => {
                                         )}
                                     >
                                         {option === "Draft" && <FileClock className="h-3.5 w-3.5" />}
+                                        {option === "Archived" && <Archive className="h-3.5 w-3.5" />}
                                         {option}
                                         <span
                                             className={cn(
@@ -840,6 +913,8 @@ const QuestionLibrary = () => {
                         onSearchChange={handleSearchChange}
                         onFilterChange={handleFilterChange}
                         gradeOptions={gradeOptions}
+                        gradeOptionsLoading={gradesLoading}
+                        gradeOptionsError={gradesError}
                     />
 
                     {tab === "All" && draftCount > 0 && (
@@ -882,11 +957,18 @@ const QuestionLibrary = () => {
                         </div>
                     )}
 
-                    <ConfirmBulkActionDialog action={pendingAction} count={selectedIds.size} onConfirm={handleConfirmBulkAction} onCancel={() => setPendingAction(null)} />
+                    <ConfirmBulkActionDialog
+                        action={pendingAction}
+                        count={selectedIds.size}
+                        onConfirm={handleConfirmBulkAction}
+                        onCancel={() => setPendingAction(null)}
+                        isSubmitting={isBulkActionSubmitting}
+                    />
                     <DeleteQuestionDialog
                         question={pendingDeleteQuestion}
                         onConfirm={handleConfirmDeleteRow}
                         onCancel={() => setPendingDeleteQuestion(null)}
+                        isSubmitting={isDeleteSubmitting}
                     />
                     <EditTagsDialog open={isTagDialogOpen} count={selectedIds.size} onApply={handleApplyTags} onCancel={() => setIsTagDialogOpen(false)} />
 

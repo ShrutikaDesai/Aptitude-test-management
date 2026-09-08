@@ -66,3 +66,13 @@ export const updateQuestionApi = async (questionId, payload) => {
 
   return response.data;
 };
+
+// ================= DELETE QUESTION =================
+
+export const deleteQuestionApi = async (questionId) => {
+  const response = await axiosInstance.delete(
+    `/asse/questions/${questionId}/`
+  );
+
+  return response.data;
+};

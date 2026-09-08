@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Trash2, Pencil, GripVertical, Plus, Check, Clock, HelpCircle } from "lucide-react";
+import { Trash2, Pencil, GripVertical, Plus, Check, Clock, HelpCircle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { adminTheme } from "@/theme/adminTheme";
 
@@ -45,6 +45,11 @@ export const INITIAL_SECTIONS = [
 // All four input atoms accept a `disabled` prop so individual fields on
 // this step can be locked while leaving the Section/Subsection name
 // dropdowns editable.
+//
+// SelectInput additionally accepts a `loading` prop — while true it
+// disables the field, swaps the option list for a single "Loading…"
+// placeholder, and shows a small spinner inside the field so it's obvious
+// data is still in flight (rather than the dropdown just being empty).
 // ---------------------------------------------------------------------------
 
 const FieldLabel = ({ children, required }) => (
@@ -78,30 +83,53 @@ const TextInput = ({ id, value, onChange, placeholder, disabled, required = fals
   </div>
 );
 
-const SelectInput = ({ id, value, onChange, options, required = false, error, disabled = false }) => (
+const SelectInput = ({
+  id,
+  value,
+  onChange,
+  options,
+  required = false,
+  error,
+  disabled = false,
+  loading = false,
+}) => (
   <div>
-    <select
-      id={id}
-      value={value}
-      onChange={onChange}
-      required={required}
-      disabled={disabled}
-      className={cn(
-        "h-11 w-full text-sm",
-        adminTheme.radius.md,
-        adminTheme.border.default,
-        "border bg-white px-3 text-slate-900",
-        "focus:outline-none focus:ring-2 focus:ring-slate-900/10",
-        disabled && "cursor-not-allowed bg-slate-50 text-slate-400",
-        error && "border-red-300 focus:ring-red-200"
+    <div className="relative">
+      <select
+        id={id}
+        value={loading ? "" : value}
+        onChange={onChange}
+        required={required}
+        disabled={disabled || loading}
+        aria-busy={loading}
+        className={cn(
+          "h-11 w-full text-sm",
+          adminTheme.radius.md,
+          adminTheme.border.default,
+          "border bg-white px-3 text-slate-900",
+          loading && "pr-9",
+          "focus:outline-none focus:ring-2 focus:ring-slate-900/10",
+          (disabled || loading) && "cursor-not-allowed bg-slate-50 text-slate-400",
+          error && "border-red-300 focus:ring-red-200"
+        )}
+      >
+        {loading ? (
+          <option value="">Loading…</option>
+        ) : (
+          options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))
+        )}
+      </select>
+      {loading && (
+        <Loader2
+          className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-slate-400"
+          aria-hidden="true"
+        />
       )}
-    >
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
+    </div>
     {error && <p className="mt-1 text-xs font-medium text-red-600">{error}</p>}
   </div>
 );
@@ -170,7 +198,6 @@ const SubsectionRow = ({
   subsectionOptions,
   subsectionCodeByName,
     subsectionIdByName, 
-  subsectionDimensionByName,
   subsectionDescriptionByName,
   subsectionInstructionsByName,
   subsectionTimeLimitByName,
@@ -196,9 +223,6 @@ const SubsectionRow = ({
 
     const matchedCode = subsectionCodeByName?.[selectedName];
     if (matchedCode != null) onFieldChange(subsection.id, "subsectionCode", matchedCode);
-
-    const matchedDimension = subsectionDimensionByName?.[selectedName];
-    if (matchedDimension != null) onFieldChange(subsection.id, "dimensionId", matchedDimension);
 
     const matchedDescription = subsectionDescriptionByName?.[selectedName];
     if (matchedDescription != null) onFieldChange(subsection.id, "description", matchedDescription);
@@ -235,8 +259,8 @@ const SubsectionRow = ({
                 value={subsection.name}
                 onChange={(e) => handleSubsectionNameChange(e.target.value)}
                 options={subsectionOptions}
+                loading={isLoadingSubsections}
               />
-              {isLoadingSubsections && <p className="mt-1 text-xs text-slate-400">Loading subsections…</p>}
             </div>
             <div className="sm:col-span-3">
               <FieldLabel>Subsection Code</FieldLabel>
@@ -416,7 +440,6 @@ const SectionCard = ({
   subsectionOptions,
     subsectionIdByName,
   subsectionCodeByName,
-  subsectionDimensionByName,
   subsectionDescriptionByName,
   subsectionInstructionsByName,
   subsectionTimeLimitByName,
@@ -516,8 +539,8 @@ const SectionCard = ({
                 value={section.name}
                 onChange={(e) => handleSectionNameChange(e.target.value)}
                 options={sectionOptions}
+                loading={isLoadingSections}
               />
-              {isLoadingSections && <p className="mt-1 text-xs text-slate-400">Loading sections…</p>}
             </div>
             <div className="sm:col-span-3">
               <FieldLabel>Section Code</FieldLabel>
@@ -608,7 +631,6 @@ const SectionCard = ({
               subsectionOptions={subsectionOptions}
               subsectionCodeByName={subsectionCodeByName}
                 subsectionIdByName={subsectionIdByName} 
-              subsectionDimensionByName={subsectionDimensionByName}
               subsectionDescriptionByName={subsectionDescriptionByName}
               subsectionInstructionsByName={subsectionInstructionsByName}
               subsectionTimeLimitByName={subsectionTimeLimitByName}
@@ -645,7 +667,6 @@ const StructureStep = ({
   subsectionOptions,
   subsectionCodeByName,
   subsectionIdByName,           // NEW
-  subsectionDimensionByName,
   subsectionDescriptionByName,
   subsectionInstructionsByName,
   subsectionTimeLimitByName,
@@ -713,7 +734,6 @@ const StructureStep = ({
             subsectionOptions={subsectionOptions}
             subsectionCodeByName={subsectionCodeByName}
               subsectionIdByName={subsectionIdByName} 
-            subsectionDimensionByName={subsectionDimensionByName}
             subsectionDescriptionByName={subsectionDescriptionByName}
             subsectionInstructionsByName={subsectionInstructionsByName}
             subsectionTimeLimitByName={subsectionTimeLimitByName}

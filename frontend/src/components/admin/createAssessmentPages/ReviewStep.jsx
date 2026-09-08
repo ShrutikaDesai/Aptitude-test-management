@@ -136,8 +136,7 @@ const StructureTimingCard = ({ sections, onEdit }) => {
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold text-slate-900">{section.name}</p>
               <p className="mt-0.5 truncate text-xs text-slate-400">
-                {section.subsections.length} Subsections &middot; Up to{" "}
-                {section.subsections.reduce((sum, sub) => sum + (Number(sub.questionLimit) || 0), 0)} Questions
+                {section.subsections.length} Subsections
               </p>
             </div>
             <span className="shrink-0 text-sm font-semibold text-slate-900">{section.timeLimitMinutes} Mins</span>
@@ -149,8 +148,7 @@ const StructureTimingCard = ({ sections, onEdit }) => {
         <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
           {sections.length} Sections &middot; {totalSubsections} Subsections
         </span>
-        <span className="text-base font-bold text-slate-900">Up to {totalQuestionLimit} Questions</span>
-      </div>
+         </div>
     </div>
   );
 };
@@ -201,7 +199,7 @@ const QuestionMappingSummaryCard = ({ sections, blueprintItems, onEdit }) => {
                     isComplete ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
                   )}
                 >
-                  {row.mapped}/{row.limit}
+                  {row.mapped}
                 </span>
               </div>
             );
@@ -296,8 +294,9 @@ const ReadyToLaunchCard = ({ isReady, isPublishing, onPublish }) => {
   );
 };
 
+
 const ReviewStep = ({
-   form,
+  form,
   grades,
   gradeLabels,
   sections,
@@ -308,12 +307,6 @@ const ReviewStep = ({
   onGoToStep,
   onPublish,
 }) => {
-  const totalQuestionLimit = sections.reduce(
-    (sum, s) => sum + s.subsections.reduce((subSum, sub) => subSum + (Number(sub.questionLimit) || 0), 0),
-    0
-  );
-  const isQuestionMappingComplete = totalQuestionLimit > 0 && blueprintItems.length >= totalQuestionLimit;
-
   const checklist = [
     {
       title: "Assessment Details",
@@ -327,52 +320,93 @@ const ReviewStep = ({
     },
     {
       title: "Grade & Board Mapping",
-      description: grades.length > 0 ? "At least one grade mapping is configured." : "Add at least one grade mapping.",
+      description:
+        grades.length > 0
+          ? "At least one grade mapping is configured."
+          : "Add at least one grade mapping.",
       isComplete: grades.length > 0,
     },
     {
       title: "Section Hierarchy",
-      description: sections.length > 0 ? "Valid structure with timings." : "Add at least one section.",
+      description:
+        sections.length > 0
+          ? "Valid structure with timings."
+          : "Add at least one section.",
       isComplete: sections.length > 0,
     },
     {
       title: "Question Bank Mapping",
-      description: isQuestionMappingComplete
-        ? "Every subsection has reached its question limit."
-        : `${blueprintItems.length}/${totalQuestionLimit} questions mapped across all subsections.`,
-      isComplete: isQuestionMappingComplete,
+      description:
+        blueprintItems.length > 0
+          ? "Questions have been mapped."
+          : "No questions have been mapped yet.",
+      isComplete: blueprintItems.length > 0,
     },
     {
       title: "Candidate Instructions",
-      description: form.instructions ? "Candidate-facing instructions added." : "Optional: no candidate instructions added yet.",
+      description: form.instructions
+        ? "Candidate-facing instructions added."
+        : "Optional: no candidate instructions added yet.",
       isComplete: Boolean(form.instructions),
       isOptional: true,
     },
   ];
 
-  const isReady = checklist.filter((item) => !item.isOptional).every((item) => item.isComplete);
+  const isReady = checklist
+    .filter((item) => !item.isOptional)
+    .every((item) => item.isComplete);
 
   return (
     <div className="space-y-6">
       <ReadyToPublishBanner isReady={isReady} />
+
       <ValidationErrorsBanner errors={validationErrors} />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
-          <AssessmentDetailsSummaryCard form={form} assessmentTypeLabels={assessmentTypeLabels} onEdit={() => onGoToStep(1)} />
-          <VersionSettingsSummaryCard form={form} onEdit={() => onGoToStep(2)} />
-          <GradeMappingSummaryCard grades={grades} gradeLabels={gradeLabels} onEdit={() => onGoToStep(3)} />
-          <StructureTimingCard sections={sections} onEdit={() => onGoToStep(4)} />
-          <QuestionMappingSummaryCard sections={sections} blueprintItems={blueprintItems} onEdit={() => onGoToStep(5)} />
+          <AssessmentDetailsSummaryCard
+            form={form}
+            assessmentTypeLabels={assessmentTypeLabels}
+            onEdit={() => onGoToStep(1)}
+          />
+
+          <VersionSettingsSummaryCard
+            form={form}
+            onEdit={() => onGoToStep(2)}
+          />
+
+          <GradeMappingSummaryCard
+            grades={grades}
+            gradeLabels={gradeLabels}
+            onEdit={() => onGoToStep(3)}
+          />
+
+          <StructureTimingCard
+            sections={sections}
+            onEdit={() => onGoToStep(4)}
+          />
+
+          <QuestionMappingSummaryCard
+            sections={sections}
+            blueprintItems={blueprintItems}
+            onEdit={() => onGoToStep(5)}
+          />
         </div>
 
         <div className="space-y-6">
           <LaunchChecklistCard checklist={checklist} />
-          <ReadyToLaunchCard isReady={isReady} isPublishing={isPublishing} onPublish={onPublish} />
+
+          <ReadyToLaunchCard
+            isReady={isReady}
+            isPublishing={isPublishing}
+            onPublish={onPublish}
+          />
         </div>
       </div>
     </div>
   );
 };
+
+
 
 export default ReviewStep;

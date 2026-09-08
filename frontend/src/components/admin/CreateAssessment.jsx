@@ -105,19 +105,16 @@ const ASSESSMENT_TYPE_LABELS = ASSESSMENT_TYPES.reduce((acc, option) => {
 
 const VALID_ASSESSMENT_TYPES = ASSESSMENT_TYPES.map((o) => o.value).filter(Boolean);
 
-const DEFAULT_ASSESSMENT_NAME_OPTIONS = [
-  "Career Assessment – Grade 10",
-  "Aptitude Assessment – Grade 9",
-  "Interest Assessment – Grade 8",
-  "Psychometric Assessment – Grade 11",
-];
+// FIX: removed hardcoded DEFAULT_ASSESSMENT_NAME_OPTIONS dummy list.
+// The dropdown should only ever show names that actually came from the
+// backend (apiAssessmentNames) or names the user typed in this session —
+// never a canned starter set that shows up before any API data has loaded.
 
 // assessments.default_language
 const LANGUAGES = [
   { value: "English", label: "English" },
   { value: "Hindi", label: "Hindi" },
-  { value: "Spanish", label: "Spanish" },
-  { value: "French", label: "French" },
+  { value: "Marathi", label: "Marathi" },
 ];
 
 // assessments + assessment_versions (Step 1 form)
@@ -137,10 +134,9 @@ const INITIAL_FORM = {
   duration: 60, // duration_minutes
   reportTemplateId: "",
   instructions: "", // candidate-facing instructions
-  allowResume: true, // allow_resume
-  allowReview: true, // allow_review
+  allowResume: false, // allow_resume
+  allowReview: false, // allow_review
   randomizeSections: false, // randomize_sections
-  randomizeQuestions: false, // randomize_questions
   showResultImmediately: false, // show_result_immediately
 };
 
@@ -163,8 +159,8 @@ const normalizeLanguageValue = (languageValue) => {
   const shortCode = normalized.slice(0, 2).toLowerCase();
   if (shortCode === "en") return "English";
   if (shortCode === "hi") return "Hindi";
-  if (shortCode === "es") return "Spanish";
-  if (shortCode === "fr") return "French";
+  if (shortCode === "mr") return "Marathi";
+
 
   return normalized;
 };
@@ -177,30 +173,54 @@ const normalizeLanguageValue = (languageValue) => {
 const unwrapDraftDetail = (raw) =>
   raw?.results?.data ?? raw?.data?.data ?? raw?.data ?? raw?.results ?? raw ?? {};
 
+// FIX (recurring bug): every time a different wizard step got saved, the
+// backend nested `blueprint_id` at yet another depth — top-level on the
+// blueprint entry (Grade Mapping step), then on a subsection row
+// (Structure step: blueprint[0].sections[0].subsections[0].blueprint_id),
+// then on a question row (Question Mapping step:
+// blueprint[0].sections[0].subsections[0].questions[0].blueprint_id) — and
+// each fix so far just added one more hardcoded path, which broke again
+// the next time a step exposed a new depth. Instead of guessing every
+// possible path, walk the whole `blueprint` tree recursively and return
+// the first `blueprint_id` key found at any depth. This is robust to
+// whatever depth the backend nests it at next.
+const findFirstBlueprintId = (node, depth = 0) => {
+  if (node == null || depth > 10) return null;
+
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const found = findFirstBlueprintId(item, depth + 1);
+      if (found != null) return found;
+    }
+    return null;
+  }
+
+  if (typeof node === "object") {
+    if (node.blueprint_id != null) return node.blueprint_id;
+    for (const key of Object.keys(node)) {
+      const found = findFirstBlueprintId(node[key], depth + 1);
+      if (found != null) return found;
+    }
+  }
+
+  return null;
+};
+
 // Pulls the blueprint row id (the id blueprint-update/${id}/ expects) out
-// of whatever shape the detail/GET response uses. Mirrors the fallback
-// chain persistDraft() already uses for the create/POST response, plus a
-// couple of extra shapes in case the GET nests it differently (e.g. one id
-// per grade entry instead of a single top-level blueprint array).
+// of whatever shape the detail/GET response uses — see findFirstBlueprintId
+// above for why this searches recursively instead of listing fixed paths.
 const extractBlueprintId = (detail) => {
-  const directCandidates = [
-    detail?.blueprint?.[0]?.id,
-    detail?.blueprint_id,
-    detail?.blueprint_items?.[0]?.id,
-    detail?.blueprint_items?.[0]?.blueprint_id,
-  ];
+  const foundInBlueprint = findFirstBlueprintId(detail?.blueprint);
+  if (foundInBlueprint != null) return foundInBlueprint;
 
-  for (const candidate of directCandidates) {
-    if (candidate != null) return candidate;
-  }
+  const foundInBlueprintItems = findFirstBlueprintId(detail?.blueprint_items);
+  if (foundInBlueprintItems != null) return foundInBlueprintItems;
 
-  // Some detail responses group blueprint rows per grade — check the first
-  // grade entry for an id/blueprint_id field as a last resort.
-  const firstGradeEntry = Array.isArray(detail?.blueprint_items) ? detail.blueprint_items[0] : null;
-  if (firstGradeEntry) {
-    if (firstGradeEntry.id != null) return firstGradeEntry.id;
-    if (firstGradeEntry.blueprint_id != null) return firstGradeEntry.blueprint_id;
-  }
+  // Fall back to a plain top-level id/blueprint_id if the tree walk above
+  // found nothing (e.g. blueprint/blueprint_items missing entirely).
+  if (detail?.blueprint_id != null) return detail.blueprint_id;
+  if (detail?.blueprint?.[0]?.id != null) return detail.blueprint[0].id;
+  if (detail?.blueprint_items?.[0]?.id != null) return detail.blueprint_items[0].id;
 
   return null;
 };
@@ -211,15 +231,36 @@ const hydrateWizardFromDetail = (rawDetail) => {
   const assessment = detail?.assessment ?? {};
   const version = detail?.assessment_version ?? detail?.version ?? {};
   const rawBlueprintItems = Array.isArray(detail?.blueprint_items) ? detail.blueprint_items : [];
+
+    // NEW — question id -> { code, text }, captured from the raw flat items
+  // before any grouping happens, so text survives regardless of which
+  // blueprintItemsSource branch runs below.
+  const questionMetaById = new Map();
+  rawBlueprintItems.forEach((item) => {
+    const q = item?.question;
+    const qId = q?.id ?? item?.question_id;
+    if (qId != null && !questionMetaById.has(qId)) {
+      questionMetaById.set(qId, {
+        questionCode: q?.question_code ?? "",
+        questionText: q?.question_text ?? "",
+      });
+    }
+  });
+
   const blueprintItemsSource = rawBlueprintItems.some(
     (item) => item?.section || item?.subsection || item?.grade
   )
     ? Array.from(
       rawBlueprintItems.reduce((gradeMap, item) => {
         const gradeId = item?.grade_id ?? item?.grade?.id;
-        const sectionId = item?.section_id ?? item?.section?.id;
-        const subsectionId = item?.subsection_id ?? item?.subsection?.id;
-        if (gradeId == null || sectionId == null || subsectionId == null) return gradeMap;
+        // FIX: this used to bail out of the whole row — losing the grade
+        // and board too — whenever section_id/subsection_id were null
+        // (e.g. a grade mapping saved with no structure mapped yet, like
+        // { grade: {id:28}, section: {id:null}, subsection: {id:null} }).
+        // A grade with nothing mapped under it yet is still a real grade
+        // mapping the backend has saved — only skip nesting a
+        // section/subsection for THIS row, don't drop the grade entry.
+        if (gradeId == null) return gradeMap;
 
         if (!gradeMap.has(gradeId)) {
           gradeMap.set(gradeId, {
@@ -228,6 +269,10 @@ const hydrateWizardFromDetail = (rawDetail) => {
             sections: [],
           });
         }
+
+        const sectionId = item?.section_id ?? item?.section?.id;
+        const subsectionId = item?.subsection_id ?? item?.subsection?.id;
+        if (sectionId == null || subsectionId == null) return gradeMap;
 
         const gradeEntry = gradeMap.get(gradeId);
         let sectionEntry = gradeEntry.sections.find((section) => section.section_id === sectionId);
@@ -283,7 +328,6 @@ const hydrateWizardFromDetail = (rawDetail) => {
     allowResume: version?.allow_resume ?? INITIAL_FORM.allowResume,
     allowReview: version?.allow_review ?? INITIAL_FORM.allowReview,
     randomizeSections: version?.randomize_sections ?? INITIAL_FORM.randomizeSections,
-    randomizeQuestions: version?.randomize_questions ?? INITIAL_FORM.randomizeQuestions,
     showResultImmediately: version?.show_result_immediately ?? INITIAL_FORM.showResultImmediately,
   };
 
@@ -320,7 +364,7 @@ const hydrateWizardFromDetail = (rawDetail) => {
       if (!sectionsById.has(sectionId)) {
         sectionsById.set(sectionId, {
           id: localSectionId,
-            dbId: sectionId, 
+          dbId: sectionId,
           name: sectionEntry?.section?.name ?? sectionEntry?.name ?? "",
           sectionCode: sectionEntry?.section?.section_code ?? sectionEntry?.section_code ?? "",
           description: sectionEntry?.section?.description ?? "",
@@ -342,10 +386,9 @@ const hydrateWizardFromDetail = (rawDetail) => {
         if (!sectionRecord.subsections.has(subsectionId)) {
           sectionRecord.subsections.set(subsectionId, {
             id: localSubsectionId,
-              dbId: subsectionId,
+            dbId: subsectionId,
             name: subEntry?.subsection?.name ?? subEntry?.name ?? "",
             subsectionCode: subEntry?.subsection?.subsection_code ?? "",
-            dimensionId: "",
             questionLimit: subEntry?.subsection?.question_limit ?? 0,
             timeLimitMinutes: subEntry?.subsection?.time_limit_minutes ?? subEntry?.time_limit_minutes ?? 0,
             description: subEntry?.subsection?.description ?? "",
@@ -373,6 +416,8 @@ const hydrateWizardFromDetail = (rawDetail) => {
               isRandomizable: false,
               isVisible: true,
               status: "ACTIVE",
+                 questionCode: questionMetaById.get(questionId)?.questionCode ?? "",
+              questionText: questionMetaById.get(questionId)?.questionText ?? "",
             });
           });
         }
@@ -388,9 +433,18 @@ const hydrateWizardFromDetail = (rawDetail) => {
 
   return {
     form: nextForm,
-    grades: nextGrades.length > 0 ? nextGrades : INITIAL_GRADES,
-    sections: nextSections.length > 0 ? nextSections : INITIAL_SECTIONS,
+    // FIX: this used to fall back to INITIAL_GRADES / INITIAL_SECTIONS
+    // (local seed/dummy state) whenever the backend returned zero grades
+    // or zero sections — but a genuinely empty result from the backend
+    // (e.g. a grade mapping saved with no structure under it yet) IS the
+    // real state and should render as empty, not get silently replaced
+    // with unrelated local placeholder data. The "no sections/grades yet"
+    // case is already handled by each step's own empty-state UI and
+    // "Add Section"/"Add Grade" buttons.
+    grades: nextGrades,
+    sections: nextSections,
     blueprintItems: blueprintItemsAcc,
+      questionMetaById,
     versionId: version?.id ?? null,
     blueprintId, // NEW — the id updateAssessmentDraftSlice needs (e.g. 245, not assessment.id)
   };
@@ -443,12 +497,10 @@ const buildAssessmentPayload = ({
       allow_resume: Boolean(form.allowResume),
       allow_review: Boolean(form.allowReview),
       randomize_sections: Boolean(form.randomizeSections),
-      randomize_questions: Boolean(form.randomizeQuestions),
       show_result_immediately: Boolean(form.showResultImmediately),
       effective_from: form.effectiveFrom || null,
       effective_to: form.effectiveTo || null,
       duration_minutes: Number(form.duration) || 0,
-    
       instructions: form.instructions?.trim() || "",
     };
   }
@@ -460,32 +512,38 @@ const buildAssessmentPayload = ({
   // Build the sections -> subsections -> question_ids tree once, then
   // repeat it under every selected grade below. Empty until Step 4/5 have
   // actually been saved through.
-const sectionsTree = includeSections
-  ? sections
-    .map((section) => {
-      const sectionId = section.dbId ?? null; // only a real backend id counts
+  const sectionsTree = includeSections
+    ? sections
+      .map((section) => {
+        const sectionId = section.dbId ?? null; // only a real backend id counts
 
-      const subsections = section.subsections
-        .map((sub) => {
-          const subsectionId = sub.dbId ?? null; // only a real backend id counts
-          const questionIds = includeQuestions
-            ? blueprintItems
-              .filter((item) => item.subsectionId === sub.id)
-              .sort((a, b) => a.sequenceNo - b.sequenceNo)
-              .map((item) => Number(item.questionId))
-              .filter((id) => Number.isFinite(id))
-            : [];
+        const subsections = section.subsections
+          .map((sub) => {
+            const subsectionId = sub.dbId ?? null; // only a real backend id counts
+            const questionIds = includeQuestions
+              ? blueprintItems
+                .filter((item) => item.subsectionId === sub.id)
+                .sort((a, b) => a.sequenceNo - b.sequenceNo)
+                .map((item) => Number(item.questionId))
+                .filter((id) => Number.isFinite(id))
+              : [];
 
-          if (subsectionId == null) return null; // <-- removed the questionIds.length === 0 check
-          return { subsection_id: subsectionId, question_ids: questionIds };
-        })
-        .filter(Boolean);
+            if (subsectionId == null) return null; // <-- removed the questionIds.length === 0 check
 
-      if (sectionId == null || subsections.length === 0) return null;
-      return { section_id: sectionId, subsections };
-    })
-    .filter(Boolean)
-  : [];
+            // NEW — backend now expects an array of { question_id } objects
+            // under "questions", not a flat array of ids under "question_ids".
+            return {
+              subsection_id: subsectionId,
+              questions: questionIds.map((id) => ({ question_id: id })),
+            };
+          })
+          .filter(Boolean);
+
+        if (sectionId == null || subsections.length === 0) return null;
+        return { section_id: sectionId, subsections };
+      })
+      .filter(Boolean)
+    : [];
 
   payload.blueprint_items = grades
     .map((g) => {
@@ -531,12 +589,98 @@ const validateStepOneFields = (form) => {
 const validateStepTwoFields = (form) => {
   const errors = {};
 
+  if (!form.versionNumber?.trim()) {
+    errors["version.version_number"] = "Version number is required.";
+  }
+
+   if (!form.versionName?.trim()) {
+    errors["version.version_name"] = "Version name is required.";
+  }
+
   if (!form.effectiveFrom) {
     errors["version.effective_from"] = "Effective-from date is required.";
   }
 
   if (!form.duration || Number(form.duration) <= 0) {
     errors["version.duration_minutes"] = "Duration must be greater than 0 minutes.";
+  }
+
+  if (!form.reportTemplateId) {
+    errors["version.report_template_id"] = "A report template must be selected.";
+  }
+
+  return errors;
+};
+
+// --- Step 3 (Grade & Board Mapping) ---
+// Only a single grade/board mapping is allowed per version (see
+// GradeMappingStep), so this just checks that the one row is filled in.
+const validateStepThreeFields = (grades) => {
+  const errors = {};
+  const grade = grades?.[0];
+
+  if (!grade?.grade) {
+    errors["grade.grade"] = "Grade is required.";
+  }
+
+  if (!grade?.board) {
+    errors["grade.board"] = "Board is required.";
+  }
+
+  return errors;
+};
+
+// --- Step 4 (Structure: sections & subsections) ---
+// Requires at least one section with a name, and every section must have
+// at least one subsection, each with a name of its own.
+const validateStepFourFields = (sections) => {
+  const errors = {};
+
+  if (!sections?.length) {
+    errors["sections"] = "At least one section is required.";
+    return errors;
+  }
+
+  sections.forEach((section, sectionIndex) => {
+    if (!section.name?.trim()) {
+      errors[`sections[${sectionIndex}].name`] = `Section ${sectionIndex + 1}: a section name is required.`;
+    }
+
+    if (!section.subsections?.length) {
+      errors[`sections[${sectionIndex}].subsections`] = `"${section.name || `Section ${sectionIndex + 1}`}": at least one subsection is required.`;
+    } else {
+      section.subsections.forEach((sub, subIndex) => {
+        if (!sub.name?.trim()) {
+          errors[`sections[${sectionIndex}].subsections[${subIndex}].name`] =
+            `"${section.name || `Section ${sectionIndex + 1}`}": subsection ${subIndex + 1} needs a name.`;
+        }
+      });
+    }
+  });
+
+  return errors;
+};
+
+// --- Step 5 (Question Mapping) ---
+// Every subsection defined in Structure must have at least one question
+// mapped to it before moving on.
+const validateStepFiveFields = (sections, blueprintItems) => {
+  const errors = {};
+  const allSubsections = (sections ?? []).flatMap((section) => section.subsections ?? []);
+
+  if (!allSubsections.length) {
+    errors["blueprintItems"] = "Define at least one subsection in Structure before mapping questions.";
+    return errors;
+  }
+
+  const unmappedSubsections = allSubsections.filter(
+    (sub) => !blueprintItems.some((item) => item.subsectionId === sub.id)
+  );
+
+  if (unmappedSubsections.length > 0) {
+    errors["blueprintItems"] = `Assign at least one question to: ${unmappedSubsections
+      .map((sub) => sub.name || "Untitled Subsection")
+      .join(", ")}.`;
   }
 
   return errors;
@@ -621,6 +765,8 @@ const validateAssessmentPayload = (payload) => {
 
   return { isValid: Object.keys(errors).length === 0, errors };
 };
+
+
 
 // ---- Sidebar ------------------------------------------------------------
 
@@ -774,7 +920,7 @@ const MobileStepTracker = ({ currentStep, onStepClick }) => {
 
 // ---- Step 1: General Info (assessments) --------------------------------
 
-const GeneralInformationCard = ({ form, onFieldChange, validationErrors = {}, assessmentNameOptions = [] }) => (
+const GeneralInformationCard = ({ form, onFieldChange, onAddNameOption, validationErrors = {}, assessmentNameOptions = [] }) => (
   <div className={cn(adminTheme.card.base, adminTheme.card.padding)}>
     <h2 className="text-base font-semibold text-slate-900">General Information</h2>
 
@@ -785,6 +931,7 @@ const GeneralInformationCard = ({ form, onFieldChange, validationErrors = {}, as
           id="name"
           value={form.name}
           onChange={(e) => onFieldChange("name", e.target.value)}
+          onAddOption={onAddNameOption}
           placeholder="e.g. Career Assessment – Grade 10"
           required
           options={assessmentNameOptions}
@@ -862,8 +1009,22 @@ const GeneralInformationCard = ({ form, onFieldChange, validationErrors = {}, as
 
 // ---- Confirmation modal & toast -------------------------------------------
 
-const ConfirmModal = ({ open, title, description, confirmLabel, cancelLabel = "Cancel", onConfirm, onCancel }) => {
+const ConfirmModal = ({
+  open,
+  title,
+  description,
+  confirmLabel,
+  cancelLabel = "Cancel",
+  onConfirm,
+  onCancel,
+  variant = "danger", // NEW: "danger" | "success"
+}) => {
   if (!open) return null;
+
+  const confirmButtonClass =
+    variant === "success"
+      ? "inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-emerald-700"
+      : "inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-red-700";
 
   return (
     <div
@@ -886,15 +1047,32 @@ const ConfirmModal = ({ open, title, description, confirmLabel, cancelLabel = "C
           <button type="button" onClick={onCancel} className={adminTheme.actionButton.secondary}>
             {cancelLabel}
           </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-red-700"
-          >
+          <button type="button" onClick={onConfirm} className={confirmButtonClass}>
             {confirmLabel}
           </button>
         </div>
       </div>
+    </div>
+  );
+};
+
+// Shown above Steps 3–5 (Grade Mapping, Structure, Question Mapping) when
+// "Save & Continue" was blocked by validateStepThree/Four/FiveFields —
+// those steps don't have per-field error props wired through their child
+// components, so a single banner listing every current message is simpler
+// than threading error props through each nested field.
+const StepValidationBanner = ({ errors }) => {
+  const messages = Object.values(errors || {});
+  if (!messages.length) return null;
+
+  return (
+    <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+      <p className="text-sm font-semibold text-red-700">Please fix the following before continuing:</p>
+      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-red-600">
+        {messages.map((message, index) => (
+          <li key={index}>{message}</li>
+        ))}
+      </ul>
     </div>
   );
 };
@@ -1013,16 +1191,23 @@ const CreateAssessment = () => {
   const [sections, setSections] = useState(INITIAL_SECTIONS);
   const [grades, setGrades] = useState(INITIAL_GRADES);
   const [blueprintItems, setBlueprintItems] = useState([]);
+
+  // FIX: this used to seed itself with DEFAULT_ASSESSMENT_NAME_OPTIONS
+  // (4 hardcoded dummy names) whenever localStorage was empty, and then
+  // immediately persisted that dummy list back to localStorage — so it
+  // never went away, even after the backend started returning real data.
+  // Now it starts empty and only ever holds names typed in this session
+  // (persisted per-browser) or names that already came from the backend.
   const [assessmentNameOptions, setAssessmentNameOptions] = useState(() => {
     if (typeof window === "undefined") {
-      return DEFAULT_ASSESSMENT_NAME_OPTIONS;
+      return [];
     }
 
     try {
       const storedOptions = window.localStorage.getItem("assessment-name-options");
       if (storedOptions) {
         const parsedOptions = JSON.parse(storedOptions);
-        if (Array.isArray(parsedOptions) && parsedOptions.length > 0) {
+        if (Array.isArray(parsedOptions)) {
           return parsedOptions;
         }
       }
@@ -1030,7 +1215,7 @@ const CreateAssessment = () => {
       console.warn("Unable to load assessment name options", error);
     }
 
-    return DEFAULT_ASSESSMENT_NAME_OPTIONS;
+    return [];
   });
   const [searchParams] = useSearchParams();
   const [isDiscardModalOpen, setIsDiscardModalOpen] = useState(false);
@@ -1042,24 +1227,18 @@ const CreateAssessment = () => {
   const [newSubsectionIds, setNewSubsectionIds] = useState(() => new Set());
 
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [questionMetaById, setQuestionMetaById] = useState(new Map());
+  const [isPublishConfirmOpen, setIsPublishConfirmOpen] = useState(false); 
+
+  // Holds the { gradeId, value } of a grade change that's waiting on user
+  // confirmation, because changing the grade invalidates any Structure
+  // (sections/subsections) and Question Mapping data already entered.
+  const [pendingGradeChange, setPendingGradeChange] = useState(null);
 
   const isLastStep = currentStep === STEPS.length;
 
   const handleFieldChange = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
-
-    if (field === "name") {
-      const trimmedValue = String(value).trim();
-      if (trimmedValue) {
-        setAssessmentNameOptions((prevOptions) => {
-          const nextOptions = prevOptions.filter((option) => option.trim() !== "");
-          if (!nextOptions.some((option) => option.toLowerCase() === trimmedValue.toLowerCase())) {
-            return [trimmedValue, ...nextOptions].slice(0, 20);
-          }
-          return nextOptions;
-        });
-      }
-    }
 
     setValidationErrors((prev) => {
       const nextErrors = { ...prev };
@@ -1070,6 +1249,21 @@ const CreateAssessment = () => {
       if (field === "reportTemplateId") delete nextErrors["version.report_template_id"]; // NEW
 
       return nextErrors;
+    });
+  };
+
+  // Adds a newly typed name into the dropdown's option list WITHOUT selecting
+  // it — the user still has to click it in the dropdown to set it as the value.
+  const handleAddAssessmentNameOption = (newName) => {
+    const trimmedValue = String(newName).trim();
+    if (!trimmedValue) return;
+
+    setAssessmentNameOptions((prevOptions) => {
+      const nextOptions = prevOptions.filter((option) => option.trim() !== "");
+      if (!nextOptions.some((option) => option.toLowerCase() === trimmedValue.toLowerCase())) {
+        return [trimmedValue, ...nextOptions].slice(0, 20);
+      }
+      return nextOptions;
     });
   };
 
@@ -1166,7 +1360,7 @@ const CreateAssessment = () => {
     const list = Array.isArray(sectionMasterList) ? sectionMasterList : [];
     return list
       .map((s) => ({
-            id: s.id,
+        id: s.id,
         name: s.name ?? s.section_name ?? "",
         code: s.section_code ?? s.code ?? "",
         description: s.description ?? "",
@@ -1247,10 +1441,9 @@ const CreateAssessment = () => {
     const list = Array.isArray(subsectionMasterList) ? subsectionMasterList : [];
     return list
       .map((s) => ({
-            id: s.id,
+        id: s.id,
         name: s.name ?? s.subsection_name ?? "",
         code: s.subsection_code ?? s.code ?? "",
-        dimensionId: s.dimension_id ?? s.dimension_code ?? s.dimension ?? "",
         description: s.description ?? "",
         instructions: s.instructions ?? "",
         timeLimitMinutes: s.time_limit_minutes ?? 0,
@@ -1279,16 +1472,7 @@ const CreateAssessment = () => {
     [subsectionMasterOptions]
   );
 
-  const subsectionDimensionByName = useMemo(
-    () =>
-      subsectionMasterOptions.reduce((acc, s) => {
-        if (s.dimensionId) acc[s.name] = s.dimensionId;
-        return acc;
-      }, {}),
-    [subsectionMasterOptions]
-  );
-
-  // Lets StructureStep set a subsection's real backend id (dbId) when its
+   // Lets StructureStep set a subsection's real backend id (dbId) when its
   // name is picked from the dropdown — this is what actually goes in the payload.
   const subsectionIdByName = useMemo(
     () =>
@@ -1438,6 +1622,7 @@ const CreateAssessment = () => {
     setGrades(hydrated.grades);
     setSections(hydrated.sections);
     setBlueprintItems(hydrated.blueprintItems);
+       setQuestionMetaById(hydrated.questionMetaById);
 
     // Only overwrite blueprintId if the GET actually gave us a real value —
     // never stomp a known-good id (e.g. the one captured right after the
@@ -1481,6 +1666,30 @@ const CreateAssessment = () => {
       }
     }
 
+    if (currentStep === 3) {
+      const stepThreeErrors = validateStepThreeFields(grades);
+      if (Object.keys(stepThreeErrors).length > 0) {
+        setValidationErrors(stepThreeErrors);
+        return;
+      }
+    }
+
+    if (currentStep === 4) {
+      const stepFourErrors = validateStepFourFields(sections);
+      if (Object.keys(stepFourErrors).length > 0) {
+        setValidationErrors(stepFourErrors);
+        return;
+      }
+    }
+
+    if (currentStep === 5) {
+      const stepFiveErrors = validateStepFiveFields(sections, blueprintItems);
+      if (Object.keys(stepFiveErrors).length > 0) {
+        setValidationErrors(stepFiveErrors);
+        return;
+      }
+    }
+
     setValidationErrors({});
 
     try {
@@ -1519,7 +1728,15 @@ const CreateAssessment = () => {
       const nextVersionId =
         result?.data?.assessment_version?.id ?? result?.assessment_version?.id ?? null;
 
-      const nextBlueprintId =
+   const nextBlueprintId =
+        // FIX (recurring bug — see findFirstBlueprintId above): every wizard
+        // step's save response has nested blueprint_id at a different depth
+        // (top-level on the blueprint entry, on a subsection row, on a
+        // question row...). Rather than keep bolting on one more hardcoded
+        // path each time a new step exposes a new depth, search the whole
+        // blueprint tree recursively for the first blueprint_id found.
+        findFirstBlueprintId(result?.data?.blueprint ?? result?.blueprint) ??
+        findFirstBlueprintId(result?.data?.blueprint_items ?? result?.blueprint_items) ??
         result?.data?.blueprint?.[0]?.id ??
         result?.blueprint?.[0]?.id ??
         result?.data?.blueprint_id ??
@@ -1542,13 +1759,29 @@ const CreateAssessment = () => {
         setBlueprintId(Number(draftDetailId));
       }
 
-      if (draftDetailId != null && Number.isFinite(Number(draftDetailId)) && !resumeBlueprintId) {
+    if (
+        draftDetailId != null &&
+        Number.isFinite(Number(draftDetailId)) &&
+        Number(draftDetailId) !== Number(resumeBlueprintId)
+      ) {
         navigate(`/s-admin/create-assessment?id=${draftDetailId}`, { replace: true });
       }
 
-      if (draftDetailId != null && Number.isFinite(Number(draftDetailId))) {
+      // if (draftDetailId != null && Number.isFinite(Number(draftDetailId))) {
+      //   justFetchedBlueprintIdRef.current = Number(draftDetailId);
+      //   skipNextHydrationRef.current = true;
+      //   void dispatch(fetchAssessmentDetailSlice(Number(draftDetailId)));
+      // }
+
+           if (draftDetailId != null && Number.isFinite(Number(draftDetailId))) {
         justFetchedBlueprintIdRef.current = Number(draftDetailId);
-        skipNextHydrationRef.current = true;
+        // Normally the post-save refetch is a "silent" one — we skip
+        // re-hydrating from it so we don't clobber newer in-progress
+        // edits made while the save was in flight. Callers that pass
+        // hydrateAfterSave (e.g. after assigning questions) explicitly
+        // want the opposite: the backend's authoritative blueprint_id,
+        // sequence numbers, and question text should replace local state.
+        skipNextHydrationRef.current = !overrides.hydrateAfterSave;
         void dispatch(fetchAssessmentDetailSlice(Number(draftDetailId)));
       }
 
@@ -1561,7 +1794,7 @@ const CreateAssessment = () => {
       setIsSavingDraft(false);
     }
   }, [currentStep, dispatch, form, grades, navigate, resumeBlueprintId, sections, blueprintItems, versionId, blueprintId]);
-  
+
   const handleDiscardClick = () => {
     setIsDiscardModalOpen(true);
   };
@@ -1593,36 +1826,49 @@ const CreateAssessment = () => {
     await handleNext();
   };
 
-  const handlePublish = async () => {
-    // Guard against double-submits (e.g. a stray Enter keypress or a second
-    // click that lands before React re-renders the disabled button).
-    if (loading) return;
+ const handlePublish = () => {
+  // Guard against double-submits (e.g. a stray Enter keypress or a second
+  // click that lands before React re-renders the disabled button).
+  if (loading) return;
 
-    const payload = buildAssessmentPayload({ form, grades, sections, blueprintItems, isDraft: false });
-    const { isValid, errors } = validateAssessmentPayload(payload);
+  const payload = buildAssessmentPayload({ form, grades, sections, blueprintItems, isDraft: false });
+  const { isValid, errors } = validateAssessmentPayload(payload);
 
-    if (!isValid) {
-      setValidationErrors(errors);
-      // Jump to Review so the error banner is visible, in case Publish was
-      // triggered from an earlier step.
-      setCurrentStep(6);
-      return;
-    }
+  if (!isValid) {
+    setValidationErrors(errors);
+    // Jump to Review so the error banner is visible, in case Publish was
+    // triggered from an earlier step.
+    setCurrentStep(6);
+    return;
+  }
 
-    setValidationErrors({});
+  setValidationErrors({});
+  setIsPublishConfirmOpen(true);
+};
 
-    try {
-      const result = await dispatch(publishAssessmentSlice(payload)).unwrap();
+const handleCancelPublish = () => {
+  setIsPublishConfirmOpen(false);
+};
 
-      console.log("Publish Success:", result);
+const confirmPublish = async () => {
+  if (loading) return;
 
-      // show success toast if required
-    } catch (error) {
-      console.error("Publish Failed:", error);
+  const payload = buildAssessmentPayload({ form, grades, sections, blueprintItems, isDraft: false });
 
-      // show error toast if required
-    }
-  };
+  setIsPublishConfirmOpen(false);
+
+  try {
+    const result = await dispatch(publishAssessmentSlice(payload)).unwrap();
+
+    console.log("Publish Success:", result);
+
+    // show success toast if required
+  } catch (error) {
+    console.error("Publish Failed:", error);
+
+    // show error toast if required
+  }
+};
 
   // --- Step 4: Structure (sections & subsections) ---
 
@@ -1633,7 +1879,7 @@ const CreateAssessment = () => {
       ...prev,
       {
         id: newId,
-          dbId: null, 
+        dbId: null,
         name: `Section ${nextIndex}`,
         sectionCode: `SECTION_${nextIndex}`,
         description: "",
@@ -1675,8 +1921,7 @@ const CreateAssessment = () => {
                 dbId: null, // not persisted yet
                 name: "Untitled Subsection",
                 subsectionCode: `SUB_${section.subsections.length + 1}`,
-                dimensionId: "",
-                questionLimit: 0,
+                             questionLimit: 0,
                 timeLimitMinutes: 0,
                 description: "Add a short description for this subsection.",
                 instructions: "",
@@ -1779,32 +2024,77 @@ const CreateAssessment = () => {
     setGrades((prev) => prev.map((grade) => ({ ...grade, isDefault: grade.id === gradeId })));
   };
 
+  // Intercepts grade-field changes coming from GradeMappingStep. Only the
+  // "grade" field itself is gated behind confirmation — switching the
+  // board alone doesn't invalidate Structure/Question Mapping data, so
+  // that passes straight through. If there's nothing downstream to lose
+  // (no sections/subsections saved to the backend yet, no mapped
+  // questions), the change also applies immediately with no prompt.
+const handleGradeFieldChangeRequest = (gradeId, field, value) => {
+  if (field !== "grade") {
+    handleGradeFieldChange(gradeId, field, value);
+    return;
+  }
+
+  const grade = grades.find((g) => g.id === gradeId);
+  const isActualChange = grade && grade.grade !== value;
+
+  if (isActualChange) {
+    setPendingGradeChange({ gradeId, value });
+    return;
+  }
+
+  handleGradeFieldChange(gradeId, field, value);
+};
+
+  const handleConfirmGradeChange = () => {
+    if (!pendingGradeChange) return;
+
+    handleGradeFieldChange(pendingGradeChange.gradeId, "grade", pendingGradeChange.value);
+
+    // Wipe downstream state — it was built for the old grade and no
+    // longer applies once the grade changes.
+    setSections(INITIAL_SECTIONS);
+    setBlueprintItems([]);
+    setNewSectionIds(new Set());
+    setNewSubsectionIds(new Set());
+
+    setPendingGradeChange(null);
+  };
+
+  const handleCancelGradeChange = () => {
+    setPendingGradeChange(null);
+  };
+
   // --- Step 5: Question Mapping (blueprint items) ---
 
-  const handleAddBlueprintQuestions = async (sectionId, subsectionId, questionIds) => {
+  const handleAddBlueprintQuestions = async (sectionId, subsectionId, questions) => {
     const startingSequence = blueprintItems.filter((item) => item.subsectionId === subsectionId).length;
 
-    const newItems = questionIds.map((questionId, index) => ({
+    const newItems = questions.map((question, index) => ({
       id: `bp-${subsectionId}-${Date.now()}-${index}`,
       sectionId,
       subsectionId,
-      questionId,
+      questionId: question.id,
       sequenceNo: startingSequence + index + 1,
-      marksOverride: 1,
-      negativeMarksOverride: 0,
+      marksOverride: question.default_marks ?? question.defaultMarks ?? 1,
+      negativeMarksOverride: question.default_negative_marks ?? question.defaultNegative ?? 0,
       isMandatory: true,
       isRandomizable: false,
       isVisible: true,
       status: "ACTIVE",
+      questionCode: question.question_code ?? String(question.id),
+      questionText: question.question_text ?? question.prompt ?? "",
     }));
 
     const updatedBlueprintItems = [...blueprintItems, ...newItems];
     setBlueprintItems(updatedBlueprintItems);
 
     try {
-      // Save immediately, using the freshly-computed array rather than the
-      // (still-stale) `blueprintItems` closure value.
-      await persistDraft({ blueprintItems: updatedBlueprintItems });
+      // Save, then explicitly re-hydrate from the GET response so the
+      // backend's authoritative blueprint_id, sequence, and question text
+      // replace what we just optimistically stamped locally above.
+      await persistDraft({ blueprintItems: updatedBlueprintItems, hydrateAfterSave: true });
     } catch (error) {
       console.error("Failed to save draft after assigning questions:", error);
       // optionally surface a toast here
@@ -1873,6 +2163,7 @@ const CreateAssessment = () => {
               <GeneralInformationCard
                 form={form}
                 onFieldChange={handleFieldChange}
+                onAddNameOption={handleAddAssessmentNameOption}
                 validationErrors={validationErrors}
                 assessmentNameOptions={mergedNameOptions}
               />
@@ -1889,33 +2180,37 @@ const CreateAssessment = () => {
             )}
 
             {currentStep === 3 && (
-              <GradeMappingStep
-                grades={grades}
-                gradeOptions={gradeOptions}
-                isLoadingGrades={gradesLoading}
-                onAddGrade={handleAddGrade}
-                onRemoveGrade={handleRemoveGrade}
-                onGradeFieldChange={handleGradeFieldChange}
-                onSetDefaultGrade={handleSetDefaultGrade}
-              />
+              <>
+                <StepValidationBanner errors={validationErrors} />
+                <GradeMappingStep
+                  grades={grades}
+                  gradeOptions={gradeOptions}
+                  isLoadingGrades={gradesLoading}
+                  onAddGrade={handleAddGrade}
+                  onRemoveGrade={handleRemoveGrade}
+                  onGradeFieldChange={handleGradeFieldChangeRequest}
+                  onSetDefaultGrade={handleSetDefaultGrade}
+                />
+              </>
             )}
 
             {currentStep === 4 && (
-              <StructureStep
+              <>
+                <StepValidationBanner errors={validationErrors} />
+                <StructureStep
                 sections={sections}
                 newSectionIds={newSectionIds}
                 newSubsectionIds={newSubsectionIds}
                 sectionOptions={sectionOptions}
                 sectionCodeByName={sectionCodeByName}
-                  sectionIdByName={sectionIdByName}  
+                sectionIdByName={sectionIdByName}
                 sectionDescriptionByName={sectionDescriptionByName}
                 sectionInstructionsByName={sectionInstructionsByName}
                 sectionMandatoryByName={sectionMandatoryByName}
                 isLoadingSections={sectionsLoading}
                 subsectionOptions={subsectionOptions}
                 subsectionCodeByName={subsectionCodeByName}
-                  subsectionIdByName={subsectionIdByName}  
-                subsectionDimensionByName={subsectionDimensionByName}
+                subsectionIdByName={subsectionIdByName}
                 subsectionDescriptionByName={subsectionDescriptionByName}
                 subsectionInstructionsByName={subsectionInstructionsByName}
                 subsectionTimeLimitByName={subsectionTimeLimitByName}
@@ -1928,20 +2223,24 @@ const CreateAssessment = () => {
                 onAddSubsection={handleAddSubsection}
                 onSubsectionFieldChange={handleSubsectionFieldChange}
                 onRequestRemoveSubsection={handleRequestRemoveSubsection}
-              />
+                />
+              </>
             )}
 
             {currentStep === 5 && (
-              <QuestionMappingStep
-                sections={sections}
-                blueprintItems={blueprintItems}
-                    versionId={versionId}   
-                onAddQuestions={handleAddBlueprintQuestions}
-                onFieldChange={handleBlueprintFieldChange}
-                onToggleVisibility={handleBlueprintFieldChange}
-                onRequestRemove={handleRequestRemoveBlueprintItem}
-                onMoveItem={handleMoveBlueprintItem}
-              />
+              <>
+                <StepValidationBanner errors={validationErrors} />
+                <QuestionMappingStep
+                  sections={sections}
+                  blueprintItems={blueprintItems}
+                  versionId={versionId}
+                  onAddQuestions={handleAddBlueprintQuestions}
+                  onFieldChange={handleBlueprintFieldChange}
+                  onToggleVisibility={handleBlueprintFieldChange}
+                  onRequestRemove={handleRequestRemoveBlueprintItem}
+                  onMoveItem={handleMoveBlueprintItem}
+                />
+              </>
             )}
 
             {currentStep === 6 && (
@@ -2001,6 +2300,27 @@ const CreateAssessment = () => {
         onConfirm={handleConfirmDelete}
         onCancel={handleCancelDelete}
       />
+
+<ConfirmModal
+  open={Boolean(pendingGradeChange)}
+  title="Are you sure you want to change the grade?"
+  description="Changing the grade will clear all Structure (sections & subsections) and Question Mapping data you've already entered for this draft. You'll need to rebuild the structure and re-map questions for the new grade. This action can't be undone."
+  confirmLabel="Change Grade"
+  cancelLabel="Keep Current Grade"
+  onConfirm={handleConfirmGradeChange}
+  onCancel={handleCancelGradeChange}
+/>
+
+<ConfirmModal
+  open={isPublishConfirmOpen}
+  title="Are you sure you want to publish this assessment?"
+  description="Once published, this version can't be edited. Double-check the Review step before continuing — you'll need to create a new version for any further changes."
+  confirmLabel={loading ? "Publishing..." : "Publish"}
+  cancelLabel="Keep Editing"
+  onConfirm={confirmPublish}
+  onCancel={handleCancelPublish}
+    variant="success"
+/>
     </div>
   );
 };

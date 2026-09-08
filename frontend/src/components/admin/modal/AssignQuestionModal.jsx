@@ -361,6 +361,7 @@ const AssignQuestionModal = ({
   versionId,
   versionGrade,
   availableQuestions,
+    assignedQuestionIds = [],
   onClose,
   onAdd,
 }) => {
@@ -386,7 +387,7 @@ const AssignQuestionModal = ({
   const [tagFilters, setTagFilters] = useState([]);
 
   const [selectedIds, setSelectedIds] = useState([]);
-
+const [selectedQuestionsById, setSelectedQuestionsById] = useState({});
   // -------------------------------------------------------------------------
   // Fetch version grades
   // -------------------------------------------------------------------------
@@ -509,6 +510,11 @@ const AssignQuestionModal = ({
   // Filter questions
   // -------------------------------------------------------------------------
 
+  const assignedIdSet = useMemo(
+    () => new Set((assignedQuestionIds ?? []).map((id) => String(id))),
+    [assignedQuestionIds]
+  );
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
 
@@ -519,6 +525,13 @@ const AssignQuestionModal = ({
     return (
       Array.isArray(sourceQuestions) ? sourceQuestions : []
     ).filter((question) => {
+      // Never show a question that's already mapped to this subsection,
+      // regardless of which source list (mock/available vs grade+tag
+      // fetched) it came from.
+      if (assignedIdSet.has(String(question.id))) {
+        return false;
+      }
+
       const matchesSearch =
         !q ||
         String(question.id ?? "")
@@ -535,20 +548,26 @@ const AssignQuestionModal = ({
     questionsByGradeTag,
     availableQuestions,
     search,
+    assignedIdSet, // NEW dependency
   ]);
 
   // -------------------------------------------------------------------------
   // Select question
   // -------------------------------------------------------------------------
 
-  const toggleSelect = (id) => {
+  const toggleSelect = (question) => {
+    const id = question.id;
     setSelectedIds((prev) =>
-      prev.includes(id)
-        ? prev.filter((x) => x !== id)
-        : [...prev, id]
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
+    setSelectedQuestionsById((prev) => {
+      if (prev[id]) {
+        const { [id]: _removed, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [id]: question };
+    });
   };
-
   // -------------------------------------------------------------------------
   // Close
   // -------------------------------------------------------------------------
@@ -556,6 +575,7 @@ const AssignQuestionModal = ({
   const handleClose = () => {
     setSearch("");
     setSelectedIds([]);
+    setSelectedQuestionsById({}); // NEW
     onClose();
   };
 
@@ -563,11 +583,20 @@ const AssignQuestionModal = ({
   // Add
   // -------------------------------------------------------------------------
 
-  const handleAdd = () => {
-    onAdd(selectedIds);
+const handleAdd = () => {
+    // NEW — send the full question objects (with text/code/marks), not
+    // just ids, so the wizard can stamp real display text onto the new
+    // blueprint items instead of leaving them to fall back to a lookup
+    // that only knows about the mock question bank.
+    const selectedQuestions = selectedIds
+      .map((id) => selectedQuestionsById[id])
+      .filter(Boolean);
+
+    onAdd(selectedQuestions);
 
     setSearch("");
     setSelectedIds([]);
+    setSelectedQuestionsById({});
   };
 
   // -------------------------------------------------------------------------
@@ -719,7 +748,7 @@ const AssignQuestionModal = ({
                 <button
                   key={question.id}
                   type="button"
-                  onClick={() => toggleSelect(question.id)}
+                  onClick={() => toggleSelect(question)}
                   className={cn(
                     "flex w-full items-start gap-3 rounded-lg border p-3 text-left transition",
                     isSelected

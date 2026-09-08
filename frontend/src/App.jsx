@@ -6,11 +6,11 @@ import { Toaster } from "@/components/ui/toast";
 import ServerError from "./ServerError";
 
 // Auth Components
-// import Register from "./components/Register";
-// import Login from "./components/Login";
-// import VerifyOtp from "./components/Verifyotp";
-// import ForgotPassword from "./components/ForgotPassword";
-// import ResetPassword from "./components/ResetPassword";
+import Register from "./components/Register";
+import Login from "./components/Login";
+import VerifyOtp from "./components/Verifyotp";
+import ForgotPassword from "./components/ForgotPassword";
+import ResetPassword from "./components/ResetPassword";
 
 // Student Components
 import TestSelection from "./components/student/TestSelection";
@@ -43,6 +43,8 @@ import QuestionMapping from "./components/admin/QuestionMapping";
 import AdminProfile from "./components/admin/AdminProfile";
 import AssessmentStructure from "./components/admin/AssessmentStructure";
 import ViewQuestion from "./components/admin/ViewQuestion";
+import CreateInterpretation from "./components/admin/CreateInterpretation";
+import InterpretationOverview from "./components/admin/InterpretationOverview";
 
 
 
@@ -65,21 +67,18 @@ const App = () => {
         <Routes>
 
           {/* Authentication */}
-          {/* <Route path="/" element={<Register />} />
+          <Route path="/" element={<Register />} />
           <Route path="/login" element={<Login />} />
           <Route path="/verify-otp" element={<VerifyOtp />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
-          <Route path="/reset-password" element={<ResetPassword />} /> */}
+          <Route path="/reset-password" element={<ResetPassword />} />
 
           {/* --------- Student Routes ----------- */}
-          <Route path="/" element={<Default />} />
+          {/* <Route path="/" element={<Default />} /> */}
           <Route path="/test-selection" element={<TestSelection />} />
           {/* <Route path="/test/aptitude" element={<AptitudeTest />} /> */}
           <Route path="/test/:testType/:sectionId/start" element={<AssessmentRunner />} />
-          <Route
-            path="/test/:testType/:sectionId/summary"
-            element={<SectionSummary />}
-          />
+          <Route path="/test/:testType/:sectionId/summary" element={<SectionSummary />}/>
           <Route path="/test/reports" element={<ResultsReady />} />
           <Route path="/test/:testType" element={<TestInstructions />} />
 
@@ -88,23 +87,25 @@ const App = () => {
 
           {/* Create assessment page without the shared admin layout */}
           <Route path="/s-admin/create-assessment" element={<CreateAssessment />} />
-        <Route path="/s-admin/create-question" element={<CreateQuestion />} />
-        <Route path="/s-admin/edit-question/:id" element={<CreateQuestion />} />
-        <Route path="/s-admin/question-library/:questionId" element={<ViewQuestion />} />
+          <Route path="/s-admin/create-question" element={<CreateQuestion />} />
+          <Route path="/s-admin/edit-question/:id" element={<CreateQuestion />} />
+          <Route path="/s-admin/question-library/:questionId" element={<ViewQuestion />} />
+          <Route path="/s-admin/create-interpretation" element={<CreateInterpretation />} />
 
           {/* ------------- Admin Routes --------------*/}
-        <Route path="/s-admin" element={<AdminLayout />}>
-          <Route index element={<AdminDashboard />} />
-          <Route path="dashboard" element={<AdminDashboard />} />
-          <Route path="assessment-overview" element={<AssessmentOverview />} />
-          <Route path="question-bank-repository" element={<QuestionBankRepository />} />
-          <Route path="question-library" element={<QuestionLibrary />} />
-          <Route path="question-mapping" element={<QuestionMapping />} />
-          <Route path="assessment-structure" element={<AssessmentStructure />} />
-          <Route path="admin-profile" element={<AdminProfile />} />
-     
-     
-        </Route> 
+          <Route path="/s-admin" element={<AdminLayout />}>
+            <Route index element={<AdminDashboard />} />
+            <Route path="dashboard" element={<AdminDashboard />} />
+            <Route path="assessment-overview" element={<AssessmentOverview />} />
+            <Route path="question-bank-repository" element={<QuestionBankRepository />} />
+            <Route path="question-library" element={<QuestionLibrary />} />
+            <Route path="question-mapping" element={<QuestionMapping />} />
+            <Route path="assessment-structure" element={<AssessmentStructure />} />
+            <Route path="interpretation-overview" element={<InterpretationOverview />} />
+            <Route path="admin-profile" element={<AdminProfile />} />
+
+
+          </Route>
 
           {/* ------------- Enterprise Routes --------------*/}
           {/* <Route path="/enterprise" element={<EnterpriseLayout />}>
