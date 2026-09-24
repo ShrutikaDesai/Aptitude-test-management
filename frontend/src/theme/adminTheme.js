@@ -190,6 +190,8 @@ export const adminTheme = {
     title: "text-sm text-slate-700",
     emphasis: "font-semibold text-slate-900",
     time: "text-xs text-slate-400",
+
+    
   },
 };
 

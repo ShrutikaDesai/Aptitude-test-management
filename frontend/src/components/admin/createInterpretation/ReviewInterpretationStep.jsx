@@ -332,14 +332,14 @@ const RuleReviewRow = ({ rule, index }) => {
           )}
 
           {/* Recommended actions */}
-          {rule.recommended_actions?.length > 0 && (
+          {rule.action_plan_options?.length > 0 && (
             <div className="mt-3">
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                 Recommended Actions
               </p>
 
               <div className="mt-1.5 space-y-1">
-                {rule.recommended_actions.map((action) => (
+                {rule.action_plan_options.map((action) => (
                   <div
                     key={action.id}
                     className="flex items-start gap-2 text-xs text-slate-600"
@@ -360,7 +360,7 @@ const RuleReviewRow = ({ rule, index }) => {
           )}
 
           {/* No actions */}
-          {!rule.recommended_actions?.length && (
+          {!rule.action_plan_options?.length && (
             <p className="mt-3 flex items-center gap-1.5 text-xs italic text-slate-400">
               <Target className="h-3 w-3" />
               No recommended actions configured.

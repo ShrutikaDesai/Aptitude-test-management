@@ -21,6 +21,7 @@ import { useMemo, useState, useCallback, useEffect } from "react";
   import { adminTheme } from "@/theme/adminTheme";
   import { useDispatch, useSelector } from "react-redux";
   import { fetchAssessmentListSlice } from "../../slices/assessmentSlice";
+  import Skeleton from "../ui/Skeleton";
 
   // ---- Constants -------------------------------------------------------------
 
@@ -209,6 +210,38 @@ import { useMemo, useState, useCallback, useEffect } from "react";
     );
   };
 
+  const AssessmentRowSkeleton = () => (
+  <tr className={adminTheme.table.row}>
+    <td className={cn(adminTheme.table.cell, "w-10")}>
+      <Skeleton className="h-[18px] w-[18px] rounded-[4px]" />
+    </td>
+    <td className={adminTheme.table.cell}>
+      <Skeleton className="h-3.5 w-6 rounded-md" />
+    </td>
+    <td className={adminTheme.table.cell}>
+      <Skeleton className="h-3.5 w-40 rounded-md" />
+    </td>
+    <td className={adminTheme.table.cell}>
+      <Skeleton className="h-5 w-16 rounded-md" />
+    </td>
+    <td className={adminTheme.table.cell}>
+      <Skeleton className="h-3.5 w-10 rounded-md" />
+    </td>
+    <td className={adminTheme.table.cell}>
+      <Skeleton className="h-3.5 w-6 rounded-md" />
+    </td>
+    <td className={adminTheme.table.cell}>
+      <Skeleton className="h-5 w-16 rounded-md" />
+    </td>
+    <td className={adminTheme.table.cell}>
+      <Skeleton className="h-3.5 w-24 rounded-md" />
+    </td>
+    <td className={cn(adminTheme.table.cell, "text-right")}>
+      <Skeleton className="ml-auto h-3.5 w-20 rounded-md" />
+    </td>
+  </tr>
+);
+
   // Pagination bar: page-size selector on the left, page controls on the
   // right. Kept as its own component so it can be reused by other admin
   // tables.
@@ -371,18 +404,16 @@ const filtered = useMemo(() => {
       setPage(1);
     }, []);
 
-    const handleOpen = useCallback(
-      (assessment) => {
-        if (assessment.status === "DRAFT") {
-          navigate(`/s-admin/create-assessment?id=${assessment.id}`);
-        } else {
-          // No read-only assessment detail route exists yet — wire this up
-          // once one does, e.g. navigate(`/s-admin/assessments/${assessment.id}`).
-          navigate("/s-admin/create-assessment");
-        }
-      },
-      [navigate]
-    );
+ const handleOpen = useCallback(
+  (assessment) => {
+    if (assessment.status === "DRAFT") {
+      navigate(`/s-admin/create-assessment?id=${assessment.id}`);
+    } else {
+      navigate(`/s-admin/view-assessment/${assessment.id}`);
+    }
+  },
+  [navigate]
+);
 
     const emptyState = {
       All: {
@@ -523,20 +554,10 @@ const filtered = useMemo(() => {
             </thead>
           
 <tbody>
-  {listLoading ? (
-    <tr>
-      <td colSpan={9}>
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-        <Loader2 className="h-8 w-8 animate-spin text-black" />
-          <p className="mt-3 text-sm font-medium text-slate-600">
-            Loading assessments...
-          </p>
-          <p className="mt-1 text-xs text-slate-400">
-            Please wait while we fetch the assessment list.
-          </p>
-        </div>
-      </td>
-    </tr>
+   {listLoading ? (
+    Array.from({ length: pageSize }).map((_, i) => (
+      <AssessmentRowSkeleton key={`skeleton-${i}`} />
+    ))
   ) : paginated.length === 0 ? (
     <tr>
       <td colSpan={9}>

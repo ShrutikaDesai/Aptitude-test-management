@@ -23,6 +23,7 @@ import {
   User,
   LogOut,
   BookOpen,
+  PackageOpen,
 
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -39,22 +40,24 @@ import { adminTheme } from "@/theme/adminTheme";
 
 
 const NAV_GROUPS = [
-   {
+  {
     label: "Dashboard",
     items: [
-      { label: "Dashboard",to: "/s-admin/dashboard",icon: LayoutGrid,},
+      { label: "Dashboard", to: "/s-admin/dashboard", icon: LayoutGrid, },
     ],
   },
   {
     label: "Repositories",
     items: [
       // { label: "Dashboard", to: "/s-admin/dashboard", icon: LayoutGrid },
-            { label: "Dashboard", to: "/s-admin/question-bank-repository", icon: Database, },
+      { label: "Dashboard", to: "/s-admin/question-bank-repository", icon: Database, },
       { label: "Assessment Overview", to: "/s-admin/assessment-overview", icon: BarChart3 },
       { label: "Question Library", to: "/s-admin/question-library", icon: ClipboardList, },
       //  { label: "Question Mapping", to: "/s-admin/question-mapping",icon: GitBranch,},
       { label: "Assessment Structure", to: "/s-admin/assessment-structure", icon: Network, },
       { label: "Interpretation", to: "/s-admin/interpretation-overview", icon: BookOpen },
+      { label: "Packages", to: "/s-admin/packages", icon: PackageOpen },
+      {label:"Enterprise Onboarding", to:"/s-admin/enterprise-onboarding", icon: HeartPulse}
     ],
   },
   // {
@@ -81,7 +84,14 @@ const BREADCRUMB_LABELS = {
   "question-bank-repository": "Question Bank Repository",
   "question-library": "Question Library",
   "question-mapping": "Question Mapping",
-    "interpretation": "Interpretation",
+ "assessment-structure": "Assessment Structure",
+  "interpretation-overview": "Interpretation",
+  "create-interpretation": "Create Interpretation",
+  "view-interpretation": "View Interpretation",
+  "view-assessment": "View Assessment",
+  "packages": "Packages",
+  "enterprise-onboarding": "Enterprise Onboarding",
+  "admin-profile": "Admin Profile",
   "iam": "Identity & Access",
   users: "Users",
   roles: "Roles",

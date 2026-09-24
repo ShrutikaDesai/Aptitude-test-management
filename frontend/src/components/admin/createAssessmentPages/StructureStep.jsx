@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Trash2, Pencil, GripVertical, Plus, Check, Clock, HelpCircle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { adminTheme } from "@/theme/adminTheme";
@@ -32,6 +32,15 @@ export const INITIAL_SECTIONS = [
     subsections: [],
   },
 ];
+
+// Removes options that are already selected somewhere else, so a section
+// (or subsection) name picked in one card/row disappears from every other
+// card/row's dropdown — you can't map the same one twice. The placeholder
+// ("" value) always stays, and a row keeps seeing its OWN current value in
+// its own dropdown (`keepValue`) even though that same value now counts as
+// "used" everywhere else.
+const excludeUsedOptions = (options, usedValues, keepValue) =>
+  options.filter((option) => !option.value || option.value === keepValue || !usedValues.has(option.value));
 
 // ---------------------------------------------------------------------------
 // Local field atoms.
@@ -446,6 +455,7 @@ const SectionCard = ({
   subsectionQuestionLimitByName,
   subsectionRandomizeByName,
   isLoadingSubsections,
+  usedSubsectionNames,
   onFieldChange,
   onRequestRemove,
   onAddSubsection,
@@ -628,7 +638,11 @@ const SectionCard = ({
               key={subsection.id}
               subsection={subsection}
               isNew={newSubsectionIds.has(subsection.id)}
-              subsectionOptions={subsectionOptions}
+              // Exclude every subsection name already used anywhere in the
+              // structure (any section, any row) EXCEPT this row's own
+              // current value — that's what keeps a picked subsection from
+              // showing up again in any other dropdown.
+              subsectionOptions={excludeUsedOptions(subsectionOptions, usedSubsectionNames, subsection.name)}
               subsectionCodeByName={subsectionCodeByName}
                 subsectionIdByName={subsectionIdByName} 
               subsectionDescriptionByName={subsectionDescriptionByName}
@@ -706,6 +720,26 @@ const StructureStep = ({
     setOpenSectionId((prev) => (prev === sectionId ? null : sectionId));
   };
 
+  // Every section name already picked anywhere in this assessment (across
+  // all section cards) — used to strip those names out of every OTHER
+  // card's dropdown, below. Recomputed whenever the structure changes.
+  const usedSectionNames = useMemo(
+    () => new Set(sections.map((section) => section.name).filter(Boolean)),
+    [sections]
+  );
+
+  // Every subsection name already picked anywhere in this assessment —
+  // across every section and every subsection row — for the same reason.
+  // A subsection picked once (in any section) disappears from every other
+  // subsection dropdown, in every section.
+  const usedSubsectionNames = useMemo(
+    () =>
+      new Set(
+        sections.flatMap((section) => section.subsections.map((sub) => sub.name)).filter(Boolean)
+      ),
+    [sections]
+  );
+
   return (
     <div>
       <div className={cn(adminTheme.card.base, adminTheme.card.padding)}>
@@ -724,7 +758,10 @@ const StructureStep = ({
             isOpen={section.id === openSectionId}
             onToggleOpen={() => handleToggleSection(section.id)}
             newSubsectionIds={newSubsectionIds}
-            sectionOptions={sectionOptions}
+            // Exclude every section name already used by another section
+            // card — same rule as subsections above, but for this card's
+            // own current value the name still shows so it stays selected.
+            sectionOptions={excludeUsedOptions(sectionOptions, usedSectionNames, section.name)}
             sectionCodeByName={sectionCodeByName}
               sectionIdByName={sectionIdByName}
             sectionDescriptionByName={sectionDescriptionByName}
@@ -732,14 +769,15 @@ const StructureStep = ({
             sectionMandatoryByName={sectionMandatoryByName}
             isLoadingSections={isLoadingSections}
             subsectionOptions={subsectionOptions}
-            subsectionCodeByName={subsectionCodeByName}
               subsectionIdByName={subsectionIdByName} 
+            subsectionCodeByName={subsectionCodeByName}
             subsectionDescriptionByName={subsectionDescriptionByName}
             subsectionInstructionsByName={subsectionInstructionsByName}
             subsectionTimeLimitByName={subsectionTimeLimitByName}
             subsectionQuestionLimitByName={subsectionQuestionLimitByName}
             subsectionRandomizeByName={subsectionRandomizeByName}
             isLoadingSubsections={isLoadingSubsections}
+            usedSubsectionNames={usedSubsectionNames}
             onFieldChange={onSectionFieldChange}
             onRequestRemove={onRequestRemoveSection}
             onAddSubsection={onAddSubsection}

@@ -54,6 +54,7 @@ import SetupContent from "./createquestion/Setupcontent";
 import Configuration from "./createquestion/Configuration";
 import ScoringWeightage from "./createquestion/ScoringWeightage";
 import Review from "./createquestion/Review";
+import Skeleton from "../ui/Skeleton";
 
 // ============================================================================
 // SHARED CONSTANTS, HELPERS & UI ATOMS
@@ -1849,27 +1850,109 @@ const handleFieldChange = (field, value) => {
 
     // Edit mode: block on the question fetch before rendering the wizard,
     // so we never flash the wizard pre-seeded with default/empty values.
-    if (isEditMode && !hasHydratedFromApi) {
-        if (getQuestionByIdError) {
-            return (
-                <div className={cn("flex min-h-screen flex-col items-center justify-center gap-3", adminTheme.surface.page)}>
-                    <AlertTriangle className="h-6 w-6 text-red-500" />
-                    <p className="text-sm text-red-600">
-                        {typeof getQuestionByIdError === "string" ? getQuestionByIdError : "Failed to load this question."}
-                    </p>
-                    <button type="button" onClick={handleBack} className={adminTheme.actionButton.secondary}>
-                        Back to Library
-                    </button>
+const isInitialLoading =
+    gradesLoading ||
+    tagsLoading ||
+    (isEditMode && !hasHydratedFromApi && !getQuestionByIdError);
+
+if (isInitialLoading) {
+    return (
+        <div className={cn("min-h-screen", adminTheme.surface.page)}>
+            {/* Header skeleton */}
+            <header
+                className={cn(
+                    "sticky top-0 z-50 border-b bg-white",
+                    adminTheme.border.default
+                )}
+            >
+                <div className="mx-auto max-w-[1600px] px-4 py-3 sm:px-6 sm:py-4 lg:px-8">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-4">
+
+                        <div className="flex min-w-0 flex-wrap items-center gap-3 sm:gap-6">
+                            <Skeleton className="h-4 w-28 rounded-md" />
+
+                            <div className="hidden items-center gap-6 sm:flex">
+                                {STEPS.map((step) => (
+                                    <div
+                                        key={step.id}
+                                        className="flex items-center gap-2"
+                                    >
+                                        <Skeleton className="h-6 w-6 rounded-full" />
+                                        <Skeleton className="h-3.5 w-20 rounded-md" />
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="flex shrink-0 items-center gap-3">
+                            <Skeleton className="h-4 w-16 rounded-md" />
+                            <Skeleton className="h-9 w-28 rounded-lg" />
+                        </div>
+                    </div>
                 </div>
-            );
-        }
-        return (
-            <div className={cn("flex min-h-screen items-center justify-center gap-2 text-slate-400", adminTheme.surface.page)}>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading question...
-            </div>
-        );
-    }
+            </header>
+
+            {/* Body skeleton */}
+            <main className="mx-auto max-w-[1600px] px-4 py-8 sm:px-6 lg:px-8">
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+
+                    <div className="space-y-6 lg:col-span-2">
+
+                        <div
+                            className={cn(
+                                adminTheme.card.base,
+                                adminTheme.card.padding
+                            )}
+                        >
+                            <Skeleton className="h-4 w-40 rounded-md" />
+
+                            <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2">
+                                {Array.from({ length: 4 }).map((_, i) => (
+                                    <div key={i}>
+                                        <Skeleton className="mb-2 h-3 w-24 rounded-md" />
+                                        <Skeleton className="h-11 w-full rounded-md" />
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="mt-5">
+                                <Skeleton className="mb-2 h-3 w-32 rounded-md" />
+                                <Skeleton className="h-36 w-full rounded-md" />
+                            </div>
+                        </div>
+
+                        <div
+                            className={cn(
+                                adminTheme.card.base,
+                                adminTheme.card.padding
+                            )}
+                        >
+                            <Skeleton className="mb-4 h-4 w-32 rounded-md" />
+                            <Skeleton className="h-11 w-full rounded-md" />
+                        </div>
+
+                    </div>
+
+                    {/* Right preview skeleton */}
+                    <div className="space-y-6">
+                        <div
+                            className={cn(
+                                adminTheme.card.base,
+                                adminTheme.card.padding
+                            )}
+                        >
+                            <Skeleton className="h-4 w-40 rounded-md" />
+                            <Skeleton className="mt-5 h-6 w-24 rounded-md" />
+                            <Skeleton className="mt-4 h-20 w-full rounded-md" />
+                            <Skeleton className="mt-4 h-10 w-full rounded-md" />
+                        </div>
+                    </div>
+
+                </div>
+            </main>
+        </div>
+    );
+}
 
     return (
         <div className={cn("min-h-screen", adminTheme.surface.page)}>

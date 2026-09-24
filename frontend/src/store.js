@@ -8,11 +8,16 @@ import questionReducer from "./slices/questionSlice";
 import tagReducer from "./slices/tagSlice";
 import reportReducer from "./slices/reportSlice";
 import questionMappingReducer from "./slices/questionMappingSlice";
+import interpretationReducer from "./slices/interpretationSlice";
+import packageReducer from "./slices/packageSlice";
+
 // student imports
 import studentSectionReducer from "./slices/student-slices/studentSectionSlice";
 import studentSubsectionReducer from "./slices/student-slices/studentSubsectionSlice";
 import studentQuestionReducer from "./slices/student-slices/studentQuestionSlice";
 
+//enterprise
+import enterpriseReducer from "./slices/enterpriseOnboardingSlice"
 
 export const store = configureStore({
   reducer: {
@@ -26,6 +31,12 @@ export const store = configureStore({
     tag: tagReducer,
     report: reportReducer,
     questionMapping: questionMappingReducer,
+    interpretation: interpretationReducer,
+    package: packageReducer,
+
+
+    // enterprise
+ enterpriseOnboarding: enterpriseReducer,
 
     // student reducers
     studentSection: studentSectionReducer,

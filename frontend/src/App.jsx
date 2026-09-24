@@ -24,12 +24,12 @@ import NotFound from "./NotFound";
 import Default from "./components/student/Default";
 
 // Enterprise Components
-// import EnterpriseLayout from "./components/layouts/EnterpriseLayout";
-// import EnterpriseDashboard from "./components/enterprise/Dashboard";
-// import Students from "./components/enterprise/Students";
-// import ViewStudentJourney from "./components/enterprise/ViewStudentJourney";
-// import Reports from "./components/enterprise/Reports";
-// import Analytics from "./components/enterprise/Analytics";
+import EnterpriseLayout from "./components/layouts/EnterpriseLayout";
+import EnterpriseDashboard from "./components/enterprise/Dashboard";
+import Students from "./components/enterprise/Students";
+import ViewStudentJourney from "./components/enterprise/ViewStudentJourney";
+import Reports from "./components/enterprise/Reports";
+import Analytics from "./components/enterprise/Analytics";
 
 // Admin Components
 import AdminLayout from "./components/layouts/AdminLayout";
@@ -45,6 +45,15 @@ import AssessmentStructure from "./components/admin/AssessmentStructure";
 import ViewQuestion from "./components/admin/ViewQuestion";
 import CreateInterpretation from "./components/admin/CreateInterpretation";
 import InterpretationOverview from "./components/admin/InterpretationOverview";
+import ViewAssessment from "./components/admin/ViewAssessment";
+import Package from "./components/admin/Package";
+import ViewInterpretation from "./components/admin/createInterpretation/ViewInterpretation";
+
+// Enterprise Components
+import EnterpriseOnboarding from "./components/EnterpriseOnboarding";
+import CreateEnterprise from "./components/CreateEnterprise";
+import EnterpriseDetail from "./components/EnterpriseDetails";
+import CreatePackage from "./components/admin/CreatePackage";
 
 
 
@@ -91,7 +100,13 @@ const App = () => {
           <Route path="/s-admin/edit-question/:id" element={<CreateQuestion />} />
           <Route path="/s-admin/question-library/:questionId" element={<ViewQuestion />} />
           <Route path="/s-admin/create-interpretation" element={<CreateInterpretation />} />
-
+          <Route path="/s-admin/view-assessment/:id" element={<ViewAssessment />} />
+          <Route path="/s-admin/view-interpretation" element={<ViewInterpretation />} />
+          <Route path="/s-admin/create-enterprise" element={<CreateEnterprise />} />
+          <Route path="/s-admin/create-enterprise/:id" element={<CreateEnterprise />} />
+          <Route path="/s-admin/organizations/:orgId" element={<EnterpriseDetail />} />
+          <Route path="/s-admin/create-package" element={<CreatePackage />} />
+   
           {/* ------------- Admin Routes --------------*/}
           <Route path="/s-admin" element={<AdminLayout />}>
             <Route index element={<AdminDashboard />} />
@@ -103,19 +118,25 @@ const App = () => {
             <Route path="assessment-structure" element={<AssessmentStructure />} />
             <Route path="interpretation-overview" element={<InterpretationOverview />} />
             <Route path="admin-profile" element={<AdminProfile />} />
+            <Route path="packages" element={<Package />} />
+            <Route path="enterprise-onboarding" element={<EnterpriseOnboarding />} />
+
+          
 
 
           </Route>
 
+
+
           {/* ------------- Enterprise Routes --------------*/}
-          {/* <Route path="/enterprise" element={<EnterpriseLayout />}>
+          <Route path="/enterprise" element={<EnterpriseLayout />}>
           <Route index element={<EnterpriseDashboard />} />
           <Route path="dashboard" element={<EnterpriseDashboard />} />
           <Route path="students" element={<Students />} />
           <Route path="student-journey" element={<ViewStudentJourney />} />
           <Route path="reports" element={<Reports />} />
           <Route path="analytics" element={<Analytics />} />
-        </Route> */}
+        </Route>
 
           {/* 404 */}
           <Route path="*" element={<NotFound />} />

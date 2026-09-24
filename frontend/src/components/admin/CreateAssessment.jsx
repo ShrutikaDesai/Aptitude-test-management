@@ -38,6 +38,7 @@ import { fetchReportTemplatesSlice } from "@/slices/reportSlice";
 import { fetchGrades } from "@/slices/gradeSlice";
 import { fetchSections } from "@/slices/sectionSlice";
 import { fetchSubsections } from "@/slices/subsectionSlice";
+import Skeleton from "@/components/ui/Skeleton";
 
 // ---- Step config ------------------------------------------------------
 
@@ -1228,7 +1229,8 @@ const CreateAssessment = () => {
 
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [questionMetaById, setQuestionMetaById] = useState(new Map());
-  const [isPublishConfirmOpen, setIsPublishConfirmOpen] = useState(false); 
+  const [isPublishConfirmOpen, setIsPublishConfirmOpen] = useState(false);
+  const [hasHydratedDraft, setHasHydratedDraft] = useState(false); 
 
   // Holds the { gradeId, value } of a grade change that's waiting on user
   // confirmation, because changing the grade invalidates any Structure
@@ -1578,6 +1580,7 @@ const CreateAssessment = () => {
       setCurrentStep(1);
       setValidationErrors({});
       setLastSavedAt(null);
+         setHasHydratedDraft(false);
       dispatch(resetAssessmentDetail());
       return;
     }
@@ -1591,11 +1594,13 @@ const CreateAssessment = () => {
     // for the same save.
     if (justFetchedBlueprintIdRef.current === Number(resumeBlueprintId)) {
       justFetchedBlueprintIdRef.current = null;
+         setHasHydratedDraft(true);
       return;
     }
 
     // GET /asse/assessment-builder/draft/{blueprintId}/ — covers page
     // loads/refreshes and directly-opened "resume draft" links.
+      setHasHydratedDraft(false);
     void dispatch(fetchAssessmentDetailSlice(resumeBlueprintId));
   }, [dispatch, resumeBlueprintId]);
 
@@ -1606,7 +1611,7 @@ const CreateAssessment = () => {
   }, [assessmentNameOptions]);
 
   useEffect(() => {
-    if (!detail) return;
+    if (!detail || !resumeBlueprintId) return; 
 
     if (skipNextHydrationRef.current) {
       // This `detail` update came from persistDraft's own post-save
@@ -1624,23 +1629,13 @@ const CreateAssessment = () => {
     setBlueprintItems(hydrated.blueprintItems);
        setQuestionMetaById(hydrated.questionMetaById);
 
-    // Only overwrite blueprintId if the GET actually gave us a real value —
-    // never stomp a known-good id (e.g. the one captured right after the
-    // create/POST call) with undefined/null just because this particular
-    // detail payload didn't carry it in the shape we expected.
     if (hydrated.blueprintId != null) {
       setBlueprintId(hydrated.blueprintId);
     }
 
     setVersionId(hydrated.versionId);
-
-    // Deliberately NOT resetting currentStep, validationErrors, or
-    // lastSavedAt here: this GET now fires right after every create
-    // (keyed on the blueprint id), which can resolve well after the user
-    // has already moved on to a later step. Forcing them back to Step 1 or
-    // clearing the "Saved at ..." indicator at that point would undo
-    // progress the user has already made in this same session.
-  }, [detail]);
+      setHasHydratedDraft(true);
+ }, [detail, resumeBlueprintId]);  
 
   useEffect(() => {
     if (!detailError) return;
@@ -1693,7 +1688,10 @@ const CreateAssessment = () => {
     setValidationErrors({});
 
     try {
-      await persistDraft();
+      // Send only the data completed up to the current wizard step. The
+      // payload builder uses this step to exclude future version/blueprint
+      // fields from an earlier save.
+      await persistDraft({ step: currentStep });
       setCurrentStep((prev) => Math.min(STEPS.length, prev + 1));
     } catch (error) {
       console.error("Next step draft save failed:", error);
@@ -1710,7 +1708,7 @@ const CreateAssessment = () => {
         sections: overrides.sections ?? sections,
         blueprintItems: overrides.blueprintItems ?? blueprintItems,
         isDraft: true,
-        step: overrides.step ?? currentStep,
+        step: overrides.step,
       });
       console.log("Draft save payload:", draftPayload);
 
@@ -1857,10 +1855,21 @@ const confirmPublish = async () => {
 
   setIsPublishConfirmOpen(false);
 
+  // Publishing an existing draft must PUT to blueprintId — the id the
+  // GET draft API returns as blueprint_items[0].blueprint_id (e.g. 609
+  // above), NOT assessment.id and NOT assessment_version.id. If there's
+  // no blueprintId yet (a brand-new draft that was never saved through
+  // persistDraft/GET), fall back to creating it via publishAssessmentSlice.
+  const publishThunk =
+    resumeBlueprintId && blueprintId != null
+      ? updateAssessmentDraftSlice({ id: versionId, payload })
+      : publishAssessmentSlice(payload);
+
   try {
-    const result = await dispatch(publishAssessmentSlice(payload)).unwrap();
+    const result = await dispatch(publishThunk).unwrap();
 
     console.log("Publish Success:", result);
+     navigate("/s-admin/assessment-overview", { replace: true });
 
     // show success toast if required
   } catch (error) {
@@ -2037,9 +2046,12 @@ const handleGradeFieldChangeRequest = (gradeId, field, value) => {
   }
 
   const grade = grades.find((g) => g.id === gradeId);
+  const hadPreviousGrade = Boolean(grade?.grade); // NEW — was a grade already picked?
   const isActualChange = grade && grade.grade !== value;
 
-  if (isActualChange) {
+  // Only confirm when overwriting an existing grade selection.
+  // First-time selection (grade.grade === "") should apply immediately.
+  if (hadPreviousGrade && isActualChange) {
     setPendingGradeChange({ gradeId, value });
     return;
   }
@@ -2141,6 +2153,8 @@ const handleGradeFieldChangeRequest = (gradeId, field, value) => {
     });
   };
 
+  const showSkeleton = Boolean(resumeBlueprintId) && !hasHydratedDraft && !detailError;
+
   return (
     <div className={cn("min-h-screen", adminTheme.surface.page)}>
       <WizardHeader
@@ -2158,7 +2172,28 @@ const handleGradeFieldChangeRequest = (gradeId, field, value) => {
 
         <main className="flex-1 min-w-0">
           <MobileStepTracker currentStep={currentStep} onStepClick={goToStep} />
-          <div className="mx-auto max-w-5xl space-y-6 px-4 py-8 sm:px-0 lg:px-0">
+<div className="mx-auto max-w-5xl space-y-6 px-4 py-8 sm:px-0 lg:px-0">
+  {showSkeleton ? (
+    <div className={cn(adminTheme.card.base, adminTheme.card.padding)}>
+      <Skeleton className="h-4 w-48" />
+      <Skeleton className="h-3 w-72 mt-2" />
+
+      <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i}>
+            <Skeleton className="h-3 w-24 mb-2" />
+            <Skeleton className="h-11 w-full" />
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-5">
+        <Skeleton className="h-3 w-32 mb-2" />
+        <Skeleton className="h-20 w-full" />
+      </div>
+    </div>
+  ) : (
+     <>
             {currentStep === 1 && (
               <GeneralInformationCard
                 form={form}
@@ -2257,13 +2292,15 @@ const handleGradeFieldChangeRequest = (gradeId, field, value) => {
                 onPublish={handlePublish}
               />
             )}
+            </>
+  )}
 
             <WizardFooter
               onDiscard={handleDiscardClick}
               onCancel={handleCancel}
               onSaveContinue={handleSaveContinue}
               isLastStep={isLastStep}
-              isSavingDraft={isSavingDraft}
+                isSavingDraft={isSavingDraft || showSkeleton}
             />
           </div>
         </main>
@@ -2324,6 +2361,8 @@ const handleGradeFieldChangeRequest = (gradeId, field, value) => {
     </div>
   );
 };
+
+export { hydrateWizardFromDetail, ASSESSMENT_TYPE_LABELS };
 
 export default CreateAssessment;
 
