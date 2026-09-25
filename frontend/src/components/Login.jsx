@@ -98,7 +98,6 @@ const Login = () => {
         }
     };
 
-
     const handleSubmit = async (e) => {
         e.preventDefault();
 
@@ -112,40 +111,6 @@ const Login = () => {
             return;
         }
 
-        // ==========================
-        // TEMPORARY LOGIN (NO API)
-        // ==========================
-
-        // Fake token
-        localStorage.setItem("accessToken", "dummy-access-token");
-        localStorage.setItem("refreshToken", "dummy-refresh-token");
-
-        // Add any user data your dashboard expects
-        localStorage.setItem(
-            "user",
-            JSON.stringify({
-                id: 1,
-                name: "Test User",
-                email: form.email,
-                role: "student",
-            })
-        );
-
-        setMessage({
-            type: "success",
-            text: "Login Successful",
-        });
-
-        setTimeout(() => {
-            navigate("/test-selection");
-            // navigate("/s-admin/dashboard");     
-        }, 500);
-
-        /*
-        ==========================
-        ORIGINAL API CODE
-        ==========================
-    
         try {
             const response = await dispatch(
                 loginUser({
@@ -153,96 +118,32 @@ const Login = () => {
                     password: form.password,
                 })
             ).unwrap();
-    
-            localStorage.setItem(
-                "accessToken",
-                response.data.access_token
-            );
-    
-            localStorage.setItem(
-                "refreshToken",
-                response.data.refresh_token
-            );
-    
+
             setMessage({
                 type: "success",
                 text: response.message || "Login Successful",
             });
-    
+
             setTimeout(() => {
                 navigate("/test-selection");
-            }, 1000);
-    
+            }, 800);
+
         } catch (error) {
-    
-            const backendErrors = error.errors || {};
-    
+            // Backend shape: { success, message, errors: { <field>: ["..."] } }
+            const backendErrors = error?.errors || {};
+            const firstFieldError = Object.values(backendErrors)[0];
+
             const errorMessage =
-                backendErrors.detail?.[0] ||
-                error.message ||
+                (Array.isArray(firstFieldError) ? firstFieldError[0] : firstFieldError) ||
+                error?.message ||
                 "Invalid Email or Password";
-    
+
             setMessage({
                 type: "error",
                 text: errorMessage,
             });
         }
-        */
     };
-
-    // const handleSubmit = async (e) => {
-    //     e.preventDefault();
-
-    //     if (!form.email || !form.password) {
-    //         setMessage({
-    //             type: "error",
-    //             text: "Please enter both email and password.",
-    //         });
-    //         return;
-    //     }
-
-    //     try {
-    //         const response = await dispatch(
-    //             loginUser({
-    //                 email: form.email,
-    //                 password: form.password,
-    //             })
-    //         ).unwrap();
-
-    //         localStorage.setItem(
-    //             "accessToken",
-    //             response.data.access_token
-    //         );
-
-    //         localStorage.setItem(
-    //             "refreshToken",
-    //             response.data.refresh_token
-    //         );
-
-    //         setMessage({
-    //             type: "success",
-    //             text: response.message || "Login Successful",
-    //         });
-
-    //         setTimeout(() => {
-    //             navigate("/test-selection");
-    //         }, 1000);
-
-    //     } catch (error) {
-
-    //         const backendErrors = error.errors || {};
-
-    //         const errorMessage =
-    //             backendErrors.detail?.[0] ||
-    //             error.message ||
-    //             "Invalid Email or Password";
-
-    //         setMessage({
-    //             type: "error",
-    //             text: errorMessage,
-    //         });
-    //     }
-    // };
 
     useEffect(() => {
         if (!message.text) return;
@@ -464,24 +365,6 @@ const Login = () => {
                         </a>
                     </p>
 
-                    {/* OAuth buttons */}
-                    {/* <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-6">
-                        <button
-                            type="button"
-                            className={`flex items-center justify-center gap-2 ${theme.radius.md} py-3 font-medium transition-colors ${theme.button.secondary}`}
-                        >
-                            <GoogleIcon className="w-5 h-5" />
-                            <span className="hidden sm:inline">Google</span>
-                        </button>
-                        <button
-                            type="button"
-                            className={`flex items-center justify-center gap-2 ${theme.radius.md} py-3 font-medium transition-colors ${theme.button.secondary}`}
-                        >
-                            <AppleIcon className="w-5 h-5" />
-                            <span className="hidden sm:inline">Apple</span>
-                        </button>
-                    </div> */}
-
                     {/* Divider */}
                     <div className="flex items-center gap-4 mb-6">
                         <div className="flex-1 h-px bg-slate-200" />
@@ -685,39 +568,6 @@ const PasswordField = ({ label, name, value, onChange, placeholder, show, toggle
                 </button>
             </div>
         </div>
-    );
-};
-
-/* ---------- Brand icons ---------- */
-
-const GoogleIcon = (props) => {
-    return (
-        <svg viewBox="0 0 24 24" {...props}>
-            <path
-                fill="#4285F4"
-                d="M23.49 12.27c0-.79-.07-1.54-.2-2.27H12v4.51h6.47a5.54 5.54 0 0 1-2.4 3.63v3h3.89c2.28-2.1 3.53-5.19 3.53-8.87z"
-            />
-            <path
-                fill="#34A853"
-                d="M12 24c3.24 0 5.95-1.07 7.93-2.91l-3.89-3a7.4 7.4 0 0 1-11-3.89H1.04v3.09A12 12 0 0 0 12 24z"
-            />
-            <path
-                fill="#FBBC05"
-                d="M5.04 14.2a7.2 7.2 0 0 1 0-4.6V6.51H1.04a12 12 0 0 0 0 10.78z"
-            />
-            <path
-                fill="#EA4335"
-                d="M12 4.77c1.76 0 3.34.6 4.59 1.8l3.44-3.44C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.69 1.04 6.51l4 3.09A7.18 7.18 0 0 1 12 4.77z"
-            />
-        </svg>
-    );
-};
-
-const AppleIcon = (props) => {
-    return (
-        <svg viewBox="0 0 24 24" fill="currentColor" {...props}>
-            <path d="M16.36 1.43c0 1.14-.46 2.2-1.21 2.97-.81.84-2.13 1.49-3.25 1.4-.14-1.1.4-2.25 1.17-3.01.83-.83 2.18-1.43 3.29-1.36zM20.3 17.18c-.55 1.27-.81 1.84-1.52 2.96-.99 1.56-2.39 3.5-4.12 3.52-1.54.02-1.93-1-4.02-.99-2.09.01-2.52 1.01-4.06.99-1.73-.02-3.05-1.77-4.04-3.33-2.78-4.35-3.07-9.45-1.36-12.17 1.21-1.94 3.13-3.07 4.92-3.07 1.83 0 2.98 1 4.49 1 1.46 0 2.36-1 4.49-1 1.6 0 3.3.87 4.5 2.38-3.96 2.17-3.32 7.83.72 9.71z" />
-        </svg>
     );
 };
 

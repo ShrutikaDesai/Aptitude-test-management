@@ -14,7 +14,6 @@ import {
   CheckCircle2,
   X,
   Inbox,
-  Loader2,
   AlertCircle,
   Search,
 } from "lucide-react";
@@ -55,6 +54,9 @@ const ASSESSMENT_TYPE_LABELS = {
 
 const INTERPRETATION_LIST_TABS = ["All", "Published", "Draft", "Archived"];
 const PAGE_SIZE_OPTIONS = [5, 10, 25];
+
+// Number of placeholder rows shown while the list is loading.
+const SKELETON_ROW_COUNT = 6;
 
 // ---- PDF export --------------------------------------------------------------
 
@@ -102,7 +104,7 @@ const downloadRuleSummaryPdf = (interpretations) => {
 
 // ---- Small building blocks --------------------------------------------------
 
-const RowCheckbox = ({ checked, indeterminate = false, onChange, label }) => {
+const RowCheckbox = ({ checked, indeterminate = false, onChange, label, disabled = false }) => {
   const ref = useCallback(
     (node) => {
       if (node) node.indeterminate = indeterminate;
@@ -116,11 +118,60 @@ const RowCheckbox = ({ checked, indeterminate = false, onChange, label }) => {
       type="checkbox"
       checked={checked}
       onChange={onChange}
+      disabled={disabled}
       aria-label={label}
-      className="h-[18px] w-[18px] rounded-[4px] border-2 border-slate-300 text-indigo-600 accent-indigo-600 focus:ring-indigo-500 cursor-pointer"
+      className="h-[18px] w-[18px] rounded-[4px] border-2 border-slate-300 text-indigo-600 accent-indigo-600 focus:ring-indigo-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
     />
   );
 };
+
+// Base skeleton primitive — a pulsing grey block. Size it with className.
+const Skeleton = ({ className }) => (
+  <div className={cn("animate-pulse rounded-md bg-slate-200/70", className)} />
+);
+
+// Varying the name width makes the placeholder rows look less uniform.
+const NAME_WIDTHS = ["w-44", "w-36", "w-52", "w-40", "w-48"];
+
+// Placeholder for one table row. Mirrors the 10 columns of the real row
+// (checkbox, assessment, type, version, sections, subsections, rules,
+// status, last updated, action) so the layout doesn't jump on load.
+const InterpretationRowSkeleton = ({ index = 0 }) => (
+  <tr className={adminTheme.table.row} aria-hidden="true">
+    <td className={cn(adminTheme.table.cell, "w-10")}>
+      <Skeleton className="h-[18px] w-[18px] rounded-[4px]" />
+    </td>
+    <td className={adminTheme.table.cell}>
+      <Skeleton className={cn("h-4", NAME_WIDTHS[index % NAME_WIDTHS.length])} />
+    </td>
+    <td className={adminTheme.table.cell}>
+      <Skeleton className="h-5 w-20" />
+    </td>
+    <td className={adminTheme.table.cell}>
+      <Skeleton className="h-4 w-28" />
+    </td>
+    <td className={adminTheme.table.cell}>
+      <Skeleton className="h-4 w-8" />
+    </td>
+    <td className={adminTheme.table.cell}>
+      <Skeleton className="h-4 w-8" />
+    </td>
+    <td className={adminTheme.table.cell}>
+      <Skeleton className="h-4 w-8" />
+    </td>
+    <td className={adminTheme.table.cell}>
+      <Skeleton className="h-5 w-16" />
+    </td>
+    <td className={adminTheme.table.cell}>
+      <Skeleton className="h-4 w-32" />
+    </td>
+    <td className={adminTheme.table.cell}>
+      <div className="flex justify-end">
+        <Skeleton className="h-4 w-24" />
+      </div>
+    </td>
+  </tr>
+);
 
 const BULK_ACTION_COPY = {
   publish: {
@@ -289,14 +340,25 @@ const InterpretationListRow = ({ interpretation, onOpen, selected, onToggleSelec
 // Pagination bar: page-size selector on the left, page controls on the
 // right. Kept as its own component so it can be reused by other admin
 // tables (same as AssessmentOverview's TablePagination).
-const TablePagination = ({ page, pageCount, pageSize, onPageChange, onPageSizeChange, totalRows, rangeStart, rangeEnd }) => (
+const TablePagination = ({
+  page,
+  pageCount,
+  pageSize,
+  onPageChange,
+  onPageSizeChange,
+  totalRows,
+  rangeStart,
+  rangeEnd,
+  loading = false,
+}) => (
   <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
     <div className="flex items-center gap-2 text-sm text-slate-500">
       <span>Rows per page</span>
       <select
         value={pageSize}
         onChange={(e) => onPageSizeChange(Number(e.target.value))}
-        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+        disabled={loading}
+        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {PAGE_SIZE_OPTIONS.map((size) => (
           <option key={size} value={size}>
@@ -307,26 +369,32 @@ const TablePagination = ({ page, pageCount, pageSize, onPageChange, onPageSizeCh
     </div>
 
     <div className="flex items-center gap-4 text-sm text-slate-500">
-      <span>
-        {totalRows === 0 ? "0 of 0" : `${rangeStart}–${rangeEnd} of ${totalRows}`}
-      </span>
+      {loading ? (
+        <Skeleton className="h-4 w-20" />
+      ) : (
+        <span>{totalRows === 0 ? "0 of 0" : `${rangeStart}–${rangeEnd} of ${totalRows}`}</span>
+      )}
       <div className="flex items-center gap-1">
         <button
           type="button"
           onClick={() => onPageChange(page - 1)}
-          disabled={page <= 1}
+          disabled={loading || page <= 1}
           className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
           aria-label="Previous page"
         >
           <ChevronLeft className="h-3.5 w-3.5" />
         </button>
-        <span className="min-w-[64px] text-center text-xs font-medium text-slate-600">
-          Page {pageCount === 0 ? 0 : page} of {pageCount}
-        </span>
+        {loading ? (
+          <Skeleton className="h-4 w-16" />
+        ) : (
+          <span className="min-w-[64px] text-center text-xs font-medium text-slate-600">
+            Page {pageCount === 0 ? 0 : page} of {pageCount}
+          </span>
+        )}
         <button
           type="button"
           onClick={() => onPageChange(page + 1)}
-          disabled={page >= pageCount}
+          disabled={loading || page >= pageCount}
           className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
           aria-label="Next page"
         >
@@ -380,7 +448,6 @@ const InterpretationsListCard = ({ interpretations, loading, error }) => {
       return haystack.includes(query);
     });
   }, [interpretations, tab, searchQuery]);
-
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, pageCount);
@@ -512,9 +579,10 @@ const InterpretationsListCard = ({ interpretations, loading, error }) => {
             <input
               type="text"
               value={searchQuery}
+              disabled={loading}
               onChange={(e) => handleSearchChange(e.target.value)}
               placeholder="Search by assessment or version..."
-              className="w-56 rounded-md border border-slate-200 bg-white py-1.5 pl-8 pr-3 text-sm text-slate-700 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400 sm:w-64"
+              className="w-56 rounded-md border border-slate-200 bg-white py-1.5 pl-8 pr-3 text-sm text-slate-700 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400 disabled:cursor-not-allowed disabled:opacity-60 sm:w-64"
             />
             {searchQuery && (
               <button
@@ -546,14 +614,23 @@ const InterpretationsListCard = ({ interpretations, loading, error }) => {
                 >
                   {option === "Draft" && <FileClock className="h-3.5 w-3.5" />}
                   {option}
-                  <span
-                    className={cn(
-                      "rounded-full px-1.5 text-[10px] font-bold",
-                      option === tab ? "bg-white/20" : "bg-slate-200/70 text-slate-500"
-                    )}
-                  >
-                    {count}
-                  </span>
+                  {loading ? (
+                    <span
+                      className={cn(
+                        "h-3.5 w-5 animate-pulse rounded-full",
+                        option === tab ? "bg-white/30" : "bg-slate-300/60"
+                      )}
+                    />
+                  ) : (
+                    <span
+                      className={cn(
+                        "rounded-full px-1.5 text-[10px] font-bold",
+                        option === tab ? "bg-white/20" : "bg-slate-200/70 text-slate-500"
+                      )}
+                    >
+                      {count}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -568,7 +645,7 @@ const InterpretationsListCard = ({ interpretations, loading, error }) => {
         </div>
       )}
 
-      {tab === "All" && draftCount > 0 && (
+      {!loading && tab === "All" && draftCount > 0 && (
         <p className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-amber-600">
           <FileClock className="h-3.5 w-3.5" />
           {draftCount} draft{draftCount === 1 ? "" : "s"} not yet published — switch to the Draft tab to pick one up.
@@ -626,7 +703,10 @@ const InterpretationsListCard = ({ interpretations, loading, error }) => {
       />
 
       <div className="mt-4 overflow-x-auto">
-        <table className="w-full min-w-[860px] border-collapse">
+        <table
+          className="w-full min-w-[860px] border-collapse"
+          aria-busy={loading}
+        >
           <thead>
             <tr>
               <th className={cn(adminTheme.table.headerCell, "w-10")}>
@@ -635,6 +715,7 @@ const InterpretationsListCard = ({ interpretations, loading, error }) => {
                   indeterminate={someOnPageSelected}
                   onChange={handleToggleSelectPage}
                   label="Select all rows on this page"
+                  disabled={loading}
                 />
               </th>
               <th className={adminTheme.table.headerCell}>Assessment</th>
@@ -650,17 +731,12 @@ const InterpretationsListCard = ({ interpretations, loading, error }) => {
           </thead>
           <tbody>
             {loading ? (
-              <tr>
-                <td colSpan={9}>
-                  <div className="flex flex-col items-center justify-center gap-2 py-16 text-sm text-slate-500">
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                    Loading interpretations...
-                  </div>
-                </td>
-              </tr>
+              Array.from({ length: Math.min(pageSize, SKELETON_ROW_COUNT) }).map((_, i) => (
+                <InterpretationRowSkeleton key={`skeleton-${i}`} index={i} />
+              ))
             ) : paginated.length === 0 ? (
               <tr>
-                <td colSpan={9}>
+                <td colSpan={10}>
                   <div className="flex flex-col items-center justify-center py-16 text-center">
                     <Inbox className="h-12 w-12 text-slate-300" />
                     <h3 className="mt-4 text-base font-semibold text-slate-700">{emptyState[tab].title}</h3>
@@ -692,6 +768,7 @@ const InterpretationsListCard = ({ interpretations, loading, error }) => {
         totalRows={filtered.length}
         rangeStart={rangeStart}
         rangeEnd={rangeEnd}
+        loading={loading}
       />
     </div>
   );
@@ -713,8 +790,21 @@ const InterpretationOverview = () => {
     interpretationListError,
   } = useSelector((state) => state.interpretation);
 
+  // Tracks whether the first fetch has settled. Without this, the slice's
+  // loading flag can be `false` on the very first render (before the thunk
+  // flips it to `true`), which would flash the "No interpretations
+  // available" empty state instead of the skeleton. If your slice already
+  // starts with `interpretationListLoading: true`, this can be removed.
+  const [hasFetched, setHasFetched] = useState(false);
+
   useEffect(() => {
-    dispatch(fetchInterpretationRulesByVersion());
+    let active = true;
+    Promise.resolve(dispatch(fetchInterpretationRulesByVersion())).finally(() => {
+      if (active) setHasFetched(true);
+    });
+    return () => {
+      active = false;
+    };
   }, [dispatch]);
 
   const interpretations = useMemo(() => {
@@ -764,14 +854,19 @@ const InterpretationOverview = () => {
     downloadRuleSummaryPdf(interpretations);
   }, [interpretations]);
 
+  const isLoading = Boolean(interpretationListLoading) || !hasFetched;
+
   return (
     <div className={cn("min-h-screen", adminTheme.surface.page)}>
-      <TopBar onDownloadSummary={handleDownloadSummary} downloadDisabled={interpretations.length === 0} />
+      <TopBar
+        onDownloadSummary={handleDownloadSummary}
+        downloadDisabled={isLoading || interpretations.length === 0}
+      />
 
       <main className="mx-auto max-w-[1600px] space-y-4 px-3 py-6 sm:px-4 lg:px-0">
         <InterpretationsListCard
           interpretations={interpretations}
-          loading={interpretationListLoading}
+          loading={isLoading}
           error={interpretationListError}
         />
       </main>

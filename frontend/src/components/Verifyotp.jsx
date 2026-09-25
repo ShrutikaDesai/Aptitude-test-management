@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { Compass, Mail, ArrowRight, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import theme from "../theme/theme";
 import { useDispatch, useSelector } from "react-redux";
-import { verifyOtp, resendOtp } from "../slices/authSlice";
+import { verifyOtp, resendOtp, registerUser } from "../slices/authSlice";
 
 const OTP_LENGTH = 6;
 const RESEND_SECONDS = 8;
@@ -16,6 +16,16 @@ const VerifyOtp = ({ step = 2, totalSteps = 3 }) => {
     const { loading } = useSelector((state) => state.auth);
     const email = location.state?.email || "";
     const mobile = location.state?.mobile || "";
+    // Full form data from the Register page — the account is only created
+    // after the OTP is verified.
+    const registerPayload = location.state?.registerPayload || null;
+
+    // Opened directly / refreshed with no form data -> back to Register
+    useEffect(() => {
+        if (!registerPayload) {
+            navigate("/register", { replace: true });
+        }
+    }, [registerPayload, navigate]);
 
     useEffect(() => {
         const link = document.createElement("link");
@@ -43,40 +53,59 @@ const VerifyOtp = ({ step = 2, totalSteps = 3 }) => {
     }, []);
 
     const runVerify = async (code) => {
+        if (!registerPayload) return;
 
         setStatus("verifying");
         setErrorMsg("");
 
-        const payload = {
-            email: email,
-            mobile: mobile,
-            otp: code,
-        };
+        // Step 1: verify the OTP
+        const verifyResult = await dispatch(
+            verifyOtp({
+                email: email,
+                mobile: mobile,
+                otp: code,
+            })
+        );
 
-        const result = await dispatch(verifyOtp(payload));
-
-        if (verifyOtp.fulfilled.match(result)) {
-
-            const { access_token, refresh_token } = result.payload.data;
-
-            localStorage.setItem("accessToken", access_token);
-            localStorage.setItem("refreshToken", refresh_token);
-
-            setStatus("success");
-
-            setTimeout(() => {
-                navigate("/test-selection");
-            }, 900);
-        } else {
-
+        if (!verifyOtp.fulfilled.match(verifyResult)) {
             setStatus("error");
-
             setErrorMsg(
-                result.payload?.message ||
-                result.payload?.detail ||
+                verifyResult.payload?.message ||
+                verifyResult.payload?.detail ||
                 "Invalid OTP"
             );
+            return;
         }
+
+        // Step 2: OTP verified -> now actually register the user
+        const registerResult = await dispatch(registerUser(registerPayload));
+
+        if (!registerUser.fulfilled.match(registerResult)) {
+            const backendErrors = registerResult.payload?.errors || {};
+            setStatus("error");
+            setErrorMsg(
+                Object.values(backendErrors).flat().join(" ") ||
+                registerResult.payload?.message ||
+                registerResult.payload?.detail ||
+                "Registration failed"
+            );
+            return;
+        }
+
+        // Tokens: prefer the register response, fall back to the verify response
+        const tokens =
+            registerResult.payload?.data ??
+            verifyResult.payload?.data ??
+            {};
+
+        if (tokens.access_token) localStorage.setItem("accessToken", tokens.access_token);
+        if (tokens.refresh_token) localStorage.setItem("refreshToken", tokens.refresh_token);
+
+        setStatus("success");
+
+        setTimeout(() => {
+            navigate("/test-selection");
+        }, 900);
     };
 
     const handleChange = (index, value) => {
@@ -264,7 +293,7 @@ const VerifyOtp = ({ step = 2, totalSteps = 3 }) => {
 
                         {status === "success" ? (
                             <p className="text-sm sm:text-base text-center mb-7 sm:mb-8" style={{ color: theme.colors.text.body }}>
-                                Your email has been verified. Redirecting you now...
+                                Your account is ready. Redirecting you now...
                             </p>
                         ) : (
                             <>

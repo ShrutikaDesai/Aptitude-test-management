@@ -11,8 +11,10 @@ import {
   Building2,
   Inbox,
   X,
-  Loader2,
   AlertTriangle,
+  FileClock,
+  Link2,
+  Check,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { adminTheme } from "@/theme/adminTheme";
@@ -21,6 +23,7 @@ import { useDispatch, useSelector } from "react-redux";
 import { fetchOrganizationsListSlice } from "../slices/enterpriseOnboardingSlice";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import Skeleton from "./ui/Skeleton";
 
 // ---- Constants -------------------------------------------------------------
 const ORG_STATUS_META = {
@@ -37,7 +40,7 @@ const ORG_STATUS_META = {
 const ORG_TYPES = [
   { value: "SCHOOL", label: "School" },
   { value: "COLLEGE", label: "College" },
-  { value: "COACHING", label: "Coaching Institute" },
+  { value: "COACHING_INSTITUTE", label: "Coaching Institute" },
   { value: "COUNSELLOR", label: "Independent Counsellor" },
   { value: "ENTERPRISE", label: "Enterprise" },
   { value: "NGO", label: "NGO" },
@@ -45,7 +48,6 @@ const ORG_TYPES = [
 ];
 const ORG_TYPE_LABELS = Object.fromEntries(ORG_TYPES.map((t) => [t.value, t.label]));
 
-const STATUS_OPTIONS = Object.entries(ORG_STATUS_META).map(([value, meta]) => ({ value, label: meta.label }));
 const PAGE_SIZE_OPTIONS = [5, 10, 20, 50, 100];
 
 const STAGE_TABS = [
@@ -57,11 +59,11 @@ const STAGE_TABS = [
 
 // ---- API record mapping -----------------------------------------------------
 // Maps one record from GET /org/organizations/list/ into the shape this
-// table renders. Confirmed against a live response — the payload looks like:
+// table renders. The payload looks like:
 //   {
 //     id, public_id, organization_code, organization_type, name, short_name,
 //     email, phone, website, address, city, state, country, pincode,
-//     logo_url, timezone, status, created_at, updated_at
+//     logo_url, timezone, status, registration_link, created_at, updated_at
 //   }
 // Notably: there is NO `contact_person` field and NO student-count field
 // on this endpoint.
@@ -99,12 +101,14 @@ const mapOrganizationRecord = (org) => ({
   students: 0, // TODO: no student-count field on this endpoint yet
   status: org.status ?? "DRAFT",
   stage: deriveStage(org),
+  registrationLink: org.registration_link ?? "",
 });
 
 // ---- PDF export ---------------------------------------------------------
 // Renders whatever's currently filtered (search/type/status) into a
 // landscape PDF table — one row per organization, matching the columns
-// visible in the on-screen table (minus row actions).
+// visible in the on-screen table (minus row actions and the copy-link
+// column, since long URLs make the PDF table too wide).
 const exportOrganizationsToPdf = (organizations) => {
   const doc = new jsPDF({ orientation: "landscape" });
 
@@ -163,6 +167,58 @@ const StatusBadge = ({ status }) => {
   );
 };
 
+// Copies an org's registration link to the clipboard. Shows a dash when
+// the org has no link yet (e.g. drafts). stopPropagation keeps the click
+// from also triggering the row's navigation to the detail page.
+const CopyLinkButton = ({ link }) => {
+  const [copied, setCopied] = useState(false);
+
+  // Reset the "Copied" state after a moment.
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 1800);
+    return () => clearTimeout(t);
+  }, [copied]);
+
+  if (!link) return <span className="text-slate-300">—</span>;
+
+  const handleCopy = async (e) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(link);
+    } catch {
+      // Fallback for non-HTTPS contexts / older browsers.
+      const el = document.createElement("textarea");
+      el.value = link;
+      el.style.position = "fixed";
+      el.style.opacity = "0";
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+    }
+    setCopied(true);
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      title={link}
+      aria-label="Copy registration link"
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition",
+        copied
+          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+          : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+      )}
+    >
+      {copied ? <Check className="h-3.5 w-3.5" /> : <Link2 className="h-3.5 w-3.5" />}
+      {copied ? "Copied" : "Copy link"}
+    </button>
+  );
+};
+
 const FilterSelect = ({ value, onChange, placeholder, options }) => (
   <select
     value={value}
@@ -215,6 +271,9 @@ const OrganizationRow = ({ organization, serialNumber, onEdit, onDelete, onView 
       <td className={adminTheme.table.cell}>
         <StatusBadge status={organization.status} />
       </td>
+      <td className={adminTheme.table.cell}>
+        <CopyLinkButton link={organization.registrationLink} />
+      </td>
       <td className={cn(adminTheme.table.cell, "text-right")}>
         <div className="flex items-center justify-end gap-3">
           {isDraft ? (
@@ -258,6 +317,54 @@ const OrganizationRow = ({ organization, serialNumber, onEdit, onDelete, onView 
     </tr>
   );
 };
+
+// Skeleton row shown in the table body while the organizations list is
+// (re)loading. Column widths loosely mirror OrganizationRow (avatar +
+// two-line name block, two-line contact block, badge, link button) so the
+// table doesn't visibly jump once real rows swap in.
+const OrganizationRowSkeleton = () => (
+  <tr className={adminTheme.table.row}>
+    <td className={adminTheme.table.cell}>
+      <Skeleton className="h-3.5 w-6 rounded-md" />
+    </td>
+    <td className={adminTheme.table.cell}>
+      <div className="flex items-center gap-3">
+        <Skeleton className="h-9 w-9 shrink-0 rounded-lg" />
+        <div className="space-y-1.5">
+          <Skeleton className="h-3.5 w-40 rounded-md" />
+          <Skeleton className="h-3 w-24 rounded-md" />
+        </div>
+      </div>
+    </td>
+    <td className={adminTheme.table.cell}>
+      <Skeleton className="h-3.5 w-20 rounded-md" />
+    </td>
+    <td className={adminTheme.table.cell}>
+      <div className="space-y-1.5">
+        <Skeleton className="h-3.5 w-28 rounded-md" />
+        <Skeleton className="h-3 w-32 rounded-md" />
+      </div>
+    </td>
+    <td className={adminTheme.table.cell}>
+      <Skeleton className="h-3.5 w-20 rounded-md" />
+    </td>
+    <td className={adminTheme.table.cell}>
+      <Skeleton className="h-3.5 w-10 rounded-md" />
+    </td>
+    <td className={adminTheme.table.cell}>
+      <Skeleton className="h-5 w-16 rounded-md" />
+    </td>
+    <td className={adminTheme.table.cell}>
+      <Skeleton className="h-6 w-24 rounded-md" />
+    </td>
+    <td className={cn(adminTheme.table.cell, "text-right")}>
+      <div className="flex items-center justify-end gap-3">
+        <Skeleton className="h-3.5 w-3.5 rounded-md" />
+        <Skeleton className="h-3.5 w-3.5 rounded-md" />
+      </div>
+    </td>
+  </tr>
+);
 
 const TablePagination = ({ page, pageCount, pageSize, onPageChange, onPageSizeChange, totalRows, rangeStart, rangeEnd }) => (
   <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
@@ -439,6 +546,10 @@ const OrganizationsListCard = ({ onRegisterExport }) => {
     return counts;
   }, [organizations]);
 
+  // Number of orgs still in DRAFT (onboarding not finished). Drives the
+  // "N drafts not yet published" notice under the filters.
+  const draftCount = tabCounts.DRAFT ?? 0;
+
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     return organizations.filter((org) => {
@@ -569,15 +680,7 @@ const OrganizationsListCard = ({ onRegisterExport }) => {
           placeholder="Organization Type"
           options={ORG_TYPES}
         />
-        <FilterSelect
-          value={statusFilter}
-          onChange={(v) => {
-            setStatusFilter(v);
-            setPage(1);
-          }}
-          placeholder="Status"
-          options={STATUS_OPTIONS}
-        />
+
         {hasActiveFilters && (
           <button
             type="button"
@@ -590,8 +693,17 @@ const OrganizationsListCard = ({ onRegisterExport }) => {
         )}
       </div>
 
+      {/* Draft notice — only on the "All" tab, once the list has loaded
+          without error, and only when at least one org is still a draft. */}
+      {!listLoading && !listError && activeTab === "all" && draftCount > 0 && (
+        <p className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-amber-600">
+          <FileClock className="h-3.5 w-3.5" />
+          {draftCount} draft{draftCount === 1 ? "" : "s"} not yet published — switch to the Draft tab to pick one up.
+        </p>
+      )}
+
       <div className="mt-4 overflow-x-auto">
-        <table className="w-full min-w-[860px] border-collapse">
+        <table className="w-full min-w-[980px] border-collapse">
           <thead>
             <tr>
               <th className={adminTheme.table.headerCell}>Sr.No</th>
@@ -601,22 +713,18 @@ const OrganizationsListCard = ({ onRegisterExport }) => {
               <th className={adminTheme.table.headerCell}>Created Date</th>
               <th className={adminTheme.table.headerCell}>Students</th>
               <th className={adminTheme.table.headerCell}>Status</th>
+              <th className={adminTheme.table.headerCell}>Registration Link</th>
               <th className={cn(adminTheme.table.headerCell, "text-right")}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {listLoading ? (
-              <tr>
-                <td colSpan={8}>
-                  <div className="flex flex-col items-center justify-center py-16 text-center">
-                    <Loader2 className="h-8 w-8 animate-spin text-slate-300" />
-                    <p className="mt-3 text-sm text-slate-500">Loading organizations...</p>
-                  </div>
-                </td>
-              </tr>
+              Array.from({ length: pageSize }).map((_, i) => (
+                <OrganizationRowSkeleton key={`skeleton-${i}`} />
+              ))
             ) : listError ? (
               <tr>
-                <td colSpan={8}>
+                <td colSpan={9}>
                   <div className="flex flex-col items-center justify-center py-16 text-center">
                     <AlertTriangle className="h-10 w-10 text-red-300" />
                     <h3 className="mt-4 text-base font-semibold text-slate-700">Couldn't load organizations</h3>
@@ -635,7 +743,7 @@ const OrganizationsListCard = ({ onRegisterExport }) => {
               </tr>
             ) : paginated.length === 0 ? (
               <tr>
-                <td colSpan={8}>
+                <td colSpan={9}>
                   <div className="flex flex-col items-center justify-center py-16 text-center">
                     <Inbox className="h-12 w-12 text-slate-300" />
                     <h3 className="mt-4 text-base font-semibold text-slate-700">No organizations found</h3>

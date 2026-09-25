@@ -13,11 +13,13 @@ import ForgotPassword from "./components/ForgotPassword";
 import ResetPassword from "./components/ResetPassword";
 
 // Student Components
+import StudentAccount from "./components/StudentAccount";
 import TestSelection from "./components/student/TestSelection";
 import AssessmentRunner from "./components/student/AssessmentRunner";
 import SectionSummary from "./components/student/SectionSummary";
 import ResultsReady from "./components/student/ResultsReady";
 import TestInstructions from "./components/student/Testinstructions";
+
 
 // 404
 import NotFound from "./NotFound";
@@ -39,7 +41,6 @@ import CreateAssessment from "./components/admin/CreateAssessment";
 import QuestionBankRepository from "./components/admin/QuestionBankRepository";
 import QuestionLibrary from "./components/admin/QuestionLibrary";
 import CreateQuestion from "./components/admin/CreateQuestion";
-import QuestionMapping from "./components/admin/QuestionMapping";
 import AdminProfile from "./components/admin/AdminProfile";
 import AssessmentStructure from "./components/admin/AssessmentStructure";
 import ViewQuestion from "./components/admin/ViewQuestion";
@@ -52,8 +53,10 @@ import ViewInterpretation from "./components/admin/createInterpretation/ViewInte
 // Enterprise Components
 import EnterpriseOnboarding from "./components/EnterpriseOnboarding";
 import CreateEnterprise from "./components/CreateEnterprise";
-import EnterpriseDetail from "./components/EnterpriseDetails";
+import EnterpriseDetail from "./components/admin/createEnterprise/EnterpriseDetails";
 import CreatePackage from "./components/admin/CreatePackage";
+import EnterpriseLogin from "./components/EnterpriseLogin";
+
 
 
 
@@ -82,8 +85,11 @@ const App = () => {
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
 
+          <Route path="/enterprise-login" element={<EnterpriseLogin />} />
+
           {/* --------- Student Routes ----------- */}
           {/* <Route path="/" element={<Default />} /> */}
+          <Route path="/student-account" element={<StudentAccount />} />
           <Route path="/test-selection" element={<TestSelection />} />
           {/* <Route path="/test/aptitude" element={<AptitudeTest />} /> */}
           <Route path="/test/:testType/:sectionId/start" element={<AssessmentRunner />} />
@@ -114,7 +120,7 @@ const App = () => {
             <Route path="assessment-overview" element={<AssessmentOverview />} />
             <Route path="question-bank-repository" element={<QuestionBankRepository />} />
             <Route path="question-library" element={<QuestionLibrary />} />
-            <Route path="question-mapping" element={<QuestionMapping />} />
+            {/* <Route path="question-mapping" element={<QuestionMapping />} /> */}
             <Route path="assessment-structure" element={<AssessmentStructure />} />
             <Route path="interpretation-overview" element={<InterpretationOverview />} />
             <Route path="admin-profile" element={<AdminProfile />} />

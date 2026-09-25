@@ -28,6 +28,120 @@ import { toast } from "@/components/ui/toast";
 
 const PAGE_SIZE_OPTIONS = [5, 10, 25];
 
+// Max number of placeholder rows shown while a table is loading.
+const SKELETON_ROW_COUNT = 6;
+
+// ---------------------------------------------------------------------------
+// Skeleton building blocks
+// ---------------------------------------------------------------------------
+
+// Base skeleton primitive — a pulsing grey block. Size it with className.
+const Skeleton = ({ className }) => (
+  <div className={cn("animate-pulse rounded-md bg-slate-200/70", className)} />
+);
+
+// Column configs for each tab's skeleton. They mirror the real table columns
+// so the layout doesn't jump when data arrives.
+//   label  -> real header text (headers render for real, only rows pulse)
+//   width  -> tailwind width class, or an array cycled per row for variety
+//   height -> optional height class (default h-4)
+//   shape  -> optional extra classes (e.g. rounded-full for pills)
+//   align  -> "right" to right-align the cell
+const GRADES_SKELETON_COLUMNS = [
+  { label: "Sr. No.", width: "w-6" },
+  { label: "Name", width: ["w-28", "w-20", "w-32", "w-24"] },
+  { label: "Level", width: ["w-24", "w-32", "w-20"] },
+  { label: "Order", width: "w-6" },
+  { label: "Status", width: "w-24", height: "h-7", shape: "rounded-full" },
+  { label: "Action", width: "w-7", height: "h-7", align: "right" },
+];
+
+const SECTIONS_SKELETON_COLUMNS = [
+  { label: "Sr. No.", width: "w-6" },
+  { label: "Code", width: "w-16" },
+  { label: "Name", width: ["w-32", "w-24", "w-36", "w-28"] },
+  { label: "Description", width: ["w-48", "w-40", "w-52"] },
+  { label: "Instructions", width: ["w-44", "w-52", "w-36"] },
+  { label: "Mandatory", width: "w-10", height: "h-5" },
+  { label: "Status", width: "w-24", height: "h-7", shape: "rounded-full" },
+  { label: "Action", width: "w-7", height: "h-7", align: "right" },
+];
+
+const SUBSECTIONS_SKELETON_COLUMNS = [
+  { label: "Sr. No.", width: "w-6" },
+  { label: "Name", width: ["w-32", "w-24", "w-36", "w-28"] },
+  { label: "Description", width: ["w-44", "w-36", "w-48"] },
+  { label: "Instructions", width: ["w-40", "w-48", "w-32"] },
+  { label: "Question limit", width: "w-8" },
+  { label: "Time limit", width: "w-14" },
+  { label: "Status", width: "w-24", height: "h-7", shape: "rounded-full" },
+  { label: "Action", width: "w-7", height: "h-7", align: "right" },
+];
+
+const TAGS_SKELETON_COLUMNS = [
+  { label: "Sr. No.", width: "w-6" },
+  { label: "Name", width: ["w-32", "w-24", "w-40", "w-28"] },
+  { label: "Action", width: "w-7", height: "h-7", align: "right" },
+];
+
+// Shared loading table used by every tab so the loading treatment stays
+// visually consistent across Grades / Sections / Subsections / Tags. Real
+// headers stay visible; only the body rows are placeholders.
+const TableSkeleton = ({ columns, rows = SKELETON_ROW_COUNT, tableClassName }) => (
+  <table className={cn("w-full border-collapse", tableClassName)} aria-busy="true">
+    <thead>
+      <tr>
+        {columns.map((col) => (
+          <th
+            key={col.label}
+            className={cn(adminTheme.table.headerCell, col.align === "right" && "text-right")}
+          >
+            {col.label}
+          </th>
+        ))}
+      </tr>
+    </thead>
+    <tbody>
+      {Array.from({ length: rows }).map((_, rowIndex) => (
+        <tr key={`skeleton-${rowIndex}`} className={adminTheme.table.row} aria-hidden="true">
+          {columns.map((col) => {
+            const width = Array.isArray(col.width) ? col.width[rowIndex % col.width.length] : col.width;
+            return (
+              <td key={col.label} className={adminTheme.table.cell}>
+                <div className={cn(col.align === "right" && "flex justify-end")}>
+                  <Skeleton className={cn(col.height ?? "h-4", width, col.shape)} />
+                </div>
+              </td>
+            );
+          })}
+        </tr>
+      ))}
+    </tbody>
+  </table>
+);
+
+// Runs a slice's fetch thunk on mount and reports when the first fetch has
+// settled. Without this, the slice's loading flag can still be `false` on the
+// very first render (before the thunk flips it to `true`), which would flash
+// the "No ... yet" empty state instead of the skeleton. If a slice already
+// starts with loading: true, this is harmless.
+const useInitialFetch = (fetchAction) => {
+  const dispatch = useDispatch();
+  const [hasFetched, setHasFetched] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    Promise.resolve(dispatch(fetchAction())).finally(() => {
+      if (active) setHasFetched(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [dispatch, fetchAction]);
+
+  return hasFetched;
+};
+
 // ---------------------------------------------------------------------------
 // Small shared UI atoms (unchanged)
 // ---------------------------------------------------------------------------
@@ -67,16 +181,6 @@ const EmptyState = ({ icon: Icon, title, subtitle }) => (
     </div>
     <p className="text-sm font-medium text-slate-700">{title}</p>
     <p className="text-xs text-slate-400">{subtitle}</p>
-  </div>
-);
-
-// Shared loading row used by every tab's table area so the loading
-// treatment stays visually consistent across Grades / Sections /
-// Subsections / Tags.
-const TableLoadingState = ({ label }) => (
-  <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
-    <Loader2 className="mx-auto h-5 w-5 animate-spin" />
-    <p className="mt-3">{label}</p>
   </div>
 );
 
@@ -193,14 +297,25 @@ const StatusToggleModal = ({ open, name, nextStatus, onCancel, onConfirm, isSubm
   );
 };
 
-const TablePagination = ({ page, pageCount, pageSize, onPageChange, onPageSizeChange, totalRows, rangeStart, rangeEnd }) => (
+const TablePagination = ({
+  page,
+  pageCount,
+  pageSize,
+  onPageChange,
+  onPageSizeChange,
+  totalRows,
+  rangeStart,
+  rangeEnd,
+  loading = false,
+}) => (
   <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
     <div className="flex items-center gap-2 text-sm text-slate-500">
       <span>Rows per page</span>
       <select
         value={pageSize}
         onChange={(e) => onPageSizeChange(Number(e.target.value))}
-        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+        disabled={loading}
+        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {PAGE_SIZE_OPTIONS.map((size) => (
           <option key={size} value={size}>
@@ -211,24 +326,32 @@ const TablePagination = ({ page, pageCount, pageSize, onPageChange, onPageSizeCh
     </div>
 
     <div className="flex items-center gap-4 text-sm text-slate-500">
-      <span>{totalRows === 0 ? "0 of 0" : `${rangeStart}–${rangeEnd} of ${totalRows}`}</span>
+      {loading ? (
+        <Skeleton className="h-4 w-20" />
+      ) : (
+        <span>{totalRows === 0 ? "0 of 0" : `${rangeStart}–${rangeEnd} of ${totalRows}`}</span>
+      )}
       <div className="flex items-center gap-1">
         <button
           type="button"
           onClick={() => onPageChange(page - 1)}
-          disabled={page <= 1}
+          disabled={loading || page <= 1}
           className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
           aria-label="Previous page"
         >
           <ChevronLeft className="h-3.5 w-3.5" />
         </button>
-        <span className="min-w-[64px] text-center text-xs font-medium text-slate-600">
-          Page {pageCount === 0 ? 0 : page} of {pageCount}
-        </span>
+        {loading ? (
+          <Skeleton className="h-4 w-16" />
+        ) : (
+          <span className="min-w-[64px] text-center text-xs font-medium text-slate-600">
+            Page {pageCount === 0 ? 0 : page} of {pageCount}
+          </span>
+        )}
         <button
           type="button"
           onClick={() => onPageChange(page + 1)}
-          disabled={page >= pageCount}
+          disabled={loading || page >= pageCount}
           className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
           aria-label="Next page"
         >
@@ -239,16 +362,27 @@ const TablePagination = ({ page, pageCount, pageSize, onPageChange, onPageSizeCh
   </div>
 );
 
-const Toolbar = ({ query, setQuery, placeholder, onAdd, addLabel, filters }) => (
+const Toolbar = ({ query, setQuery, placeholder, onAdd, addLabel, filters, loading = false }) => (
   <div className="flex flex-wrap items-center justify-between gap-3">
     <div className="flex flex-wrap items-center gap-3">
       <div className="relative w-full max-w-xs">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={placeholder} className={adminTheme.input.search} />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={placeholder}
+          disabled={loading}
+          className={cn(adminTheme.input.search, "disabled:cursor-not-allowed disabled:opacity-60")}
+        />
       </div>
       {filters}
     </div>
-    <button type="button" onClick={onAdd} className={adminTheme.actionButton.primary}>
+    <button
+      type="button"
+      onClick={onAdd}
+      disabled={loading}
+      className={cn(adminTheme.actionButton.primary, "disabled:cursor-not-allowed disabled:opacity-60")}
+    >
       <Plus className="h-4 w-4" />
       {addLabel}
     </button>
@@ -313,9 +447,8 @@ const GradesTab = () => {
 
   const { grades, gradesLoading } = useSelector((state) => state.grade);
 
-  useEffect(() => {
-    dispatch(fetchGrades());
-  }, [dispatch]);
+  const hasFetched = useInitialFetch(fetchGrades);
+  const isLoading = Boolean(gradesLoading) || !hasFetched;
 
   useEffect(() => {
     setRows(grades || []);
@@ -385,11 +518,22 @@ const GradesTab = () => {
 
   return (
     <div className={cn(adminTheme.card.base, adminTheme.card.padding)}>
-      <Toolbar query={query} setQuery={setQuery} placeholder="Search grades…" onAdd={openAdd} addLabel="Add Grade" />
+      <Toolbar
+        query={query}
+        setQuery={setQuery}
+        placeholder="Search grades…"
+        onAdd={openAdd}
+        addLabel="Add Grade"
+        loading={isLoading}
+      />
 
       <div className="mt-4 overflow-x-auto">
-        {gradesLoading ? (
-          <TableLoadingState label="Loading grades…" />
+        {isLoading ? (
+          <TableSkeleton
+            columns={GRADES_SKELETON_COLUMNS}
+            rows={Math.min(pageSize, SKELETON_ROW_COUNT)}
+            tableClassName="min-w-[520px]"
+          />
         ) : paginated.length === 0 ? (
           <EmptyState icon={GraduationCap} title="No grades yet" subtitle="Add your first grade to get started." />
         ) : (
@@ -453,6 +597,7 @@ const GradesTab = () => {
         totalRows={filtered.length}
         rangeStart={rangeStart}
         rangeEnd={rangeEnd}
+        loading={isLoading}
       />
 
       <AddGradeModal open={!!modal} mode={modal?.mode} form={form} setForm={setForm} onClose={closeModal} onSave={save} />
@@ -474,9 +619,8 @@ const SectionsTab = () => {
 
   const { sections, sectionsLoading, loading } = useSelector((state) => state.section);
 
-  useEffect(() => {
-    dispatch(fetchSections());
-  }, [dispatch]);
+  const hasFetched = useInitialFetch(fetchSections);
+  const isLoading = Boolean(sectionsLoading) || !hasFetched;
 
   useEffect(() => {
     setRows(sections || []);
@@ -567,11 +711,22 @@ const SectionsTab = () => {
 
   return (
     <div className={cn(adminTheme.card.base, adminTheme.card.padding)}>
-      <Toolbar query={query} setQuery={setQuery} placeholder="Search sections…" onAdd={openAdd} addLabel="Add Section" />
+      <Toolbar
+        query={query}
+        setQuery={setQuery}
+        placeholder="Search sections…"
+        onAdd={openAdd}
+        addLabel="Add Section"
+        loading={isLoading}
+      />
 
       <div className="mt-4 overflow-x-auto">
-        {sectionsLoading ? (
-          <TableLoadingState label="Loading sections…" />
+        {isLoading ? (
+          <TableSkeleton
+            columns={SECTIONS_SKELETON_COLUMNS}
+            rows={Math.min(pageSize, SKELETON_ROW_COUNT)}
+            tableClassName="min-w-[720px]"
+          />
         ) : paginated.length === 0 ? (
           <EmptyState icon={LayoutGrid} title="No sections yet" subtitle="Add a section to get started." />
         ) : (
@@ -643,6 +798,7 @@ const SectionsTab = () => {
         totalRows={filtered.length}
         rangeStart={rangeStart}
         rangeEnd={rangeEnd}
+        loading={isLoading}
       />
 
       <AddSectionModal open={!!modal} mode={modal?.mode} form={form} setForm={setForm} onClose={closeModal} onSave={save} loading={loading} />
@@ -652,9 +808,6 @@ const SectionsTab = () => {
 
 // ---------------------------------------------------------------------------
 // TAB 3 — Subsections
-// (previously had no loading treatment at all — `subsectionsLoading` was
-// pulled from the selector but never read, so the table just looked
-// "empty" for a beat before rows appeared. Now matches Grades/Sections/Tags.)
 // ---------------------------------------------------------------------------
 const SubsectionsTab = () => {
   const [rows, setRows] = useState([]);
@@ -668,9 +821,8 @@ const SubsectionsTab = () => {
 
   const { subsections, subsectionsLoading } = useSelector((state) => state.subsection);
 
-  useEffect(() => {
-    dispatch(fetchSubsections());
-  }, [dispatch]);
+  const hasFetched = useInitialFetch(fetchSubsections);
+  const isLoading = Boolean(subsectionsLoading) || !hasFetched;
 
   useEffect(() => {
     setRows(subsections || []);
@@ -769,11 +921,22 @@ const SubsectionsTab = () => {
 
   return (
     <div className={cn(adminTheme.card.base, adminTheme.card.padding)}>
-      <Toolbar query={query} setQuery={setQuery} placeholder="Search subsections…" onAdd={openAdd} addLabel="Add Subsection" />
+      <Toolbar
+        query={query}
+        setQuery={setQuery}
+        placeholder="Search subsections…"
+        onAdd={openAdd}
+        addLabel="Add Subsection"
+        loading={isLoading}
+      />
 
       <div className="mt-4 overflow-x-auto">
-        {subsectionsLoading ? (
-          <TableLoadingState label="Loading subsections…" />
+        {isLoading ? (
+          <TableSkeleton
+            columns={SUBSECTIONS_SKELETON_COLUMNS}
+            rows={Math.min(pageSize, SKELETON_ROW_COUNT)}
+            tableClassName="min-w-[720px]"
+          />
         ) : paginated.length === 0 ? (
           <EmptyState icon={ListTree} title="No subsections yet" subtitle="Add a subsection to get started." />
         ) : (
@@ -843,6 +1006,7 @@ const SubsectionsTab = () => {
         totalRows={filtered.length}
         rangeStart={rangeStart}
         rangeEnd={rangeEnd}
+        loading={isLoading}
       />
 
       <AddSubsectionModal open={!!modal} mode={modal?.mode} form={form} setForm={setForm} onClose={closeModal} onSave={save} />
@@ -862,9 +1026,8 @@ const TagsTab = () => {
 
   const { tags, tagsLoading } = useSelector((state) => state.tag);
 
-  useEffect(() => {
-    dispatch(fetchTags());
-  }, [dispatch]);
+  const hasFetched = useInitialFetch(fetchTags);
+  const isLoading = Boolean(tagsLoading) || !hasFetched;
 
   useEffect(() => {
     setRows(tags || []);
@@ -933,11 +1096,22 @@ const TagsTab = () => {
 
   return (
     <div className={cn(adminTheme.card.base, adminTheme.card.padding)}>
-      <Toolbar query={query} setQuery={setQuery} placeholder="Search tags…" onAdd={openAdd} addLabel="Add Tag" />
+      <Toolbar
+        query={query}
+        setQuery={setQuery}
+        placeholder="Search tags…"
+        onAdd={openAdd}
+        addLabel="Add Tag"
+        loading={isLoading}
+      />
 
       <div className="mt-4 overflow-x-auto">
-        {tagsLoading ? (
-          <TableLoadingState label="Loading tags…" />
+        {isLoading ? (
+          <TableSkeleton
+            columns={TAGS_SKELETON_COLUMNS}
+            rows={Math.min(pageSize, SKELETON_ROW_COUNT)}
+            tableClassName="min-w-[320px]"
+          />
         ) : paginated.length === 0 ? (
           <EmptyState icon={TagsIcon} title="No tags yet" subtitle="Add a tag to get started." />
         ) : (
@@ -984,6 +1158,7 @@ const TagsTab = () => {
         totalRows={filtered.length}
         rangeStart={rangeStart}
         rangeEnd={rangeEnd}
+        loading={isLoading}
       />
 
       <AddTagModal open={!!modal} mode={modal?.mode} form={form} setForm={setForm} onClose={closeModal} onSave={save} />

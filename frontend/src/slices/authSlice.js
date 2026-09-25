@@ -18,9 +18,7 @@ export const loginUser = createAsyncThunk(
       const data = await loginApi(payload);
       return data;
     } catch (error) {
-      return rejectWithValue(
-        error.response?.data || "Login Failed"
-      );
+      return rejectWithValue(error.response?.data || "Login Failed");
     }
   }
 );
@@ -34,14 +32,13 @@ export const registerUser = createAsyncThunk(
       const data = await registerApi(payload);
       return data;
     } catch (error) {
-      return rejectWithValue(
-        error.response?.data || "Registration Failed"
-      );
+      return rejectWithValue(error.response?.data || "Registration Failed");
     }
   }
 );
 
-// ================= VERIFY OTP =================
+// ================= VERIFY EMAIL OTP =================
+// POST /auth/student/verify-email-otp/
 
 export const verifyOtp = createAsyncThunk(
   "auth/verifyOtp",
@@ -57,7 +54,8 @@ export const verifyOtp = createAsyncThunk(
   }
 );
 
-// ================= RESEND OTP =================
+// ================= SEND / RESEND EMAIL OTP =================
+// POST /auth/student/send-email-otp/
 
 export const resendOtp = createAsyncThunk(
   "auth/resendOtp",
@@ -66,9 +64,7 @@ export const resendOtp = createAsyncThunk(
       const data = await resendOtpApi(payload);
       return data;
     } catch (error) {
-      return rejectWithValue(
-        error.response?.data || "Failed to resend OTP"
-      );
+      return rejectWithValue(error.response?.data || "Failed to send OTP");
     }
   }
 );
@@ -82,9 +78,7 @@ export const forgotPassword = createAsyncThunk(
       const data = await forgotPasswordApi(payload);
       return data;
     } catch (error) {
-      return rejectWithValue(
-        error.response?.data || "Failed to send OTP"
-      );
+      return rejectWithValue(error.response?.data || "Failed to send OTP");
     }
   }
 );
@@ -114,9 +108,7 @@ export const resetPassword = createAsyncThunk(
       const data = await resetPasswordApi(payload);
       return data;
     } catch (error) {
-      return rejectWithValue(
-        error.response?.data || "Password Reset Failed"
-      );
+      return rejectWithValue(error.response?.data || "Password Reset Failed");
     }
   }
 );
@@ -163,15 +155,8 @@ const authSlice = createSlice({
         state.accessToken = action.payload.access;
         state.refreshToken = action.payload.refresh;
 
-        localStorage.setItem(
-          "accessToken",
-          action.payload.access
-        );
-
-        localStorage.setItem(
-          "refreshToken",
-          action.payload.refresh
-        );
+        localStorage.setItem("accessToken", action.payload.access);
+        localStorage.setItem("refreshToken", action.payload.refresh);
       })
 
       .addCase(loginUser.rejected, (state, action) => {
@@ -180,7 +165,6 @@ const authSlice = createSlice({
       })
 
       // REGISTER
-
       .addCase(registerUser.pending, (state) => {
         state.loading = true;
         state.error = null;
@@ -188,7 +172,6 @@ const authSlice = createSlice({
 
       .addCase(registerUser.fulfilled, (state, action) => {
         state.loading = false;
-
         state.user = action.payload.user;
       })
 
@@ -197,8 +180,7 @@ const authSlice = createSlice({
         state.error = action.payload;
       })
 
-      // VERIFY OTP
-
+      // VERIFY EMAIL OTP
       .addCase(verifyOtp.pending, (state) => {
         state.loading = true;
         state.error = null;
@@ -206,7 +188,6 @@ const authSlice = createSlice({
 
       .addCase(verifyOtp.fulfilled, (state, action) => {
         state.loading = false;
-
         state.user = action.payload.user || state.user;
       })
 
@@ -215,8 +196,7 @@ const authSlice = createSlice({
         state.error = action.payload;
       })
 
-      // ================= RESEND OTP =================
-
+      // SEND / RESEND EMAIL OTP
       .addCase(resendOtp.pending, (state) => {
         state.loading = true;
         state.error = null;
@@ -231,8 +211,7 @@ const authSlice = createSlice({
         state.error = action.payload;
       })
 
-      // ================= FORGOT PASSWORD =================
-
+      // FORGOT PASSWORD
       .addCase(forgotPassword.pending, (state) => {
         state.forgotPasswordLoading = true;
       })
@@ -245,8 +224,7 @@ const authSlice = createSlice({
         state.forgotPasswordLoading = false;
       })
 
-      // ================= VERIFY RESET OTP =================
-
+      // VERIFY RESET OTP
       .addCase(verifyResetOtp.pending, (state) => {
         state.verifyResetOtpLoading = true;
       })
@@ -259,8 +237,7 @@ const authSlice = createSlice({
         state.verifyResetOtpLoading = false;
       })
 
-      // ================= RESET PASSWORD =================
-
+      // RESET PASSWORD
       .addCase(resetPassword.pending, (state) => {
         state.loading = true;
         state.error = null;
@@ -273,7 +250,7 @@ const authSlice = createSlice({
       .addCase(resetPassword.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
-      })
+      });
   },
 });
 

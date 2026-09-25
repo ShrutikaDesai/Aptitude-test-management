@@ -103,7 +103,7 @@
 import axios from "axios";
 
 const axiosInstance = axios.create({
-    baseURL: "http://192.168.1.7:8000/api/v1/",
+    baseURL: "http://192.168.1.3:8000/api/v1/",
     //  baseURL: "http://10.45.19.38:8000/api/v1/",
     // baseURL: "https://plot-warned-supposed-butterfly.trycloudflare.com/api/v1/",
 });

@@ -18,7 +18,8 @@ import {
 } from "lucide-react";
 import theme from "../theme/theme";
 import { useDispatch, useSelector } from "react-redux";
-import { registerUser } from "../slices/authSlice";
+import { resendOtp } from "../slices/authSlice";
+import { fetchGrades } from "../slices/gradeSlice";
 
 const avatarUrls = [
     "https://i.pravatar.cc/64?img=5",
@@ -28,11 +29,23 @@ const avatarUrls = [
     "https://i.pravatar.cc/64?img=14",
 ];
 
+// What the <option> submits / displays. The value is the grade's id, which is
+// sent to the register API as `grade_id`.
+const gradeValue = (grade) => String(grade.id ?? grade.public_id ?? grade.grade_id ?? "");
+const gradeLabel = (grade) => grade.grade_name ?? grade.name ?? "Untitled grade";
+
 const Register = () => {
     const navigate = useNavigate();
     const dispatch = useDispatch();
 
     const { loading } = useSelector((state) => state.auth);
+    const { grades, gradesLoading } = useSelector((state) => state.grade);
+
+    const gradeList = Array.isArray(grades) ? grades : [];
+
+    useEffect(() => {
+        dispatch(fetchGrades());
+    }, [dispatch]);
 
     useEffect(() => {
         const link = document.createElement("link");
@@ -191,22 +204,28 @@ const Register = () => {
             return;
         }
 
-        const payload = {
-            full_name: `${form.firstName} ${form.lastName}`.trim(),
+        // Full registration payload — NOT sent yet. It's handed to the
+        // Verify OTP page, which registers the user only after the OTP is verified.
+        const registerPayload = {
+            first_name: form.firstName.trim(),
+            last_name: form.lastName.trim(),
             email: form.email,
             mobile: form.mobile,
-            grade: form.grade,
+            grade_id: form.grade ? Number(form.grade) : null,
             // city: form.city,
             password: form.password,
             confirm_password: form.confirmPassword,
         };
 
         try {
-            const response = await dispatch(registerUser(payload)).unwrap();
+            // Step 1: send the OTP only
+            const response = await dispatch(
+                resendOtp({ email: form.email, mobile: form.mobile })
+            ).unwrap();
 
             setMessage({
                 type: "success",
-                text: response.message || "Registration Successful",
+                text: response?.message || "OTP sent successfully",
             });
 
             setTimeout(() => {
@@ -214,12 +233,11 @@ const Register = () => {
                     state: {
                         email: form.email,
                         mobile: form.mobile,
+                        registerPayload,
                     },
                 });
             }, 1000);
-
         } catch (err) {
-
             const backendErrors = err?.errors || {};
 
             setErrors((prev) => ({
@@ -233,7 +251,8 @@ const Register = () => {
             const errorMessage =
                 Object.values(backendErrors).flat().join("\n") ||
                 err?.message ||
-                "Registration Failed";
+                err?.detail ||
+                "Failed to send OTP";
 
             setMessage({
                 type: "error",
@@ -461,13 +480,22 @@ const Register = () => {
                                         name="grade"
                                         value={form.grade}
                                         onChange={handleChange}
-                                        className={`${theme.input.withIcon} appearance-none`}
+                                        disabled={gradesLoading || gradeList.length === 0}
+                                        className={`${theme.input.withIcon} appearance-none disabled:cursor-not-allowed disabled:opacity-70`}
                                     >
-                                        <option value="">Select grade</option>
-                                        <option value="9">Grade 9</option>
-                                        <option value="10">Grade 10</option>
-                                        <option value="11">Grade 11</option>
-                                        <option value="12">Grade 12</option>
+                                        <option value="">
+                                            {gradesLoading
+                                                ? "Loading grades…"
+                                                : gradeList.length === 0
+                                                    ? "No grades available"
+                                                    : "Select grade"}
+                                        </option>
+                                        {!gradesLoading &&
+                                            gradeList.map((grade) => (
+                                                <option key={gradeValue(grade)} value={gradeValue(grade)}>
+                                                    {gradeLabel(grade)}
+                                                </option>
+                                            ))}
                                     </select>
                                 </div>
                             </div>
@@ -545,7 +573,7 @@ const Register = () => {
                             style={{ opacity: loading ? 0.7 : 1, cursor: loading ? "not-allowed" : "pointer" }}
                         >
                             <Rocket className="w-4 h-4" />
-                            {loading ? "Creating account..." : "Begin My Journey — It's Free"}
+                            {loading ? "Sending OTP..." : "Begin My Journey — It's Free"}
                             <ArrowRight className="w-4 h-4" />
                         </button>
                     </form>
