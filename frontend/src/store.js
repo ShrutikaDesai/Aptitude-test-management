@@ -15,6 +15,7 @@ import packageReducer from "./slices/packageSlice";
 import studentSectionReducer from "./slices/student-slices/studentSectionSlice";
 import studentSubsectionReducer from "./slices/student-slices/studentSubsectionSlice";
 import studentQuestionReducer from "./slices/student-slices/studentQuestionSlice";
+import studentAssessmentReducer from "./slices/student-slices/studentAssessmentSlice";
 
 //enterprise
 import enterpriseReducer from "./slices/enterpriseOnboardingSlice"
@@ -42,6 +43,7 @@ export const store = configureStore({
     studentSection: studentSectionReducer,
     studentSubsection: studentSubsectionReducer,
     studentQuestion: studentQuestionReducer,
+    studentAssessment: studentAssessmentReducer,
 
 
   },

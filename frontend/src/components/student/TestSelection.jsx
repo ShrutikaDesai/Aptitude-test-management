@@ -7,6 +7,8 @@ import { isTestComplete } from "./Testprogress";
 import { UseTestSections } from "../hooks/UseTestSubsections";
 import Skeleton from "../ui/skeleton";
 import StudentLayout, { TopBar } from "../layouts/StudentLayout";
+import { useDispatch, useSelector } from "react-redux";
+import { fetchAssessmentQuestions } from "../../slices/student-slices/studentAssessmentSlice";
 
 // Grid columns scale with how many tests exist, instead of being
 // hardcoded for 2 — 1 test stays single-column, 2 gets a 2-up grid, 3+
@@ -22,6 +24,14 @@ const gridColsClass = (count) => {
 // is a static import, not derived from props/state.
 const TestSelection = ({ userName = "" }) => {
   const navigate = useNavigate();
+  const dispatch = useDispatch();
+const { questions, assessmentLoading, assessmentError } = useSelector(
+  (state) => state.studentAssessment
+);
+
+useEffect(() => {
+  dispatch(fetchAssessmentQuestions()); // uses localStorage "registration_id"
+}, [dispatch]);
 
   // There is no "get sections" API anymore — this derives section cards
   // from the same flat subsections fetch every other page uses, grouped

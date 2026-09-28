@@ -93,13 +93,25 @@ const VerifyOtp = ({ step = 2, totalSteps = 3 }) => {
         }
 
         // Tokens: prefer the register response, fall back to the verify response
-        const tokens =
-            registerResult.payload?.data ??
-            verifyResult.payload?.data ??
-            {};
+        // Tokens: prefer the register response, fall back to the verify response
+        const registerData = registerResult.payload?.data ?? {};
+        const tokens = registerData.access_token
+            ? registerData
+            : verifyResult.payload?.data ?? {};
 
         if (tokens.access_token) localStorage.setItem("accessToken", tokens.access_token);
         if (tokens.refresh_token) localStorage.setItem("refreshToken", tokens.refresh_token);
+
+        // Registration id -> used by GET /stu/student/registrations/<id>/assessment-questions/
+        const registrationId = registerData.registration?.id;
+        if (registrationId) {
+            localStorage.setItem("registration_id", String(registrationId));
+        }
+
+        // Optional, handy elsewhere
+        if (registerData.student?.id) {
+            localStorage.setItem("student_id", String(registerData.student.id));
+        }
 
         setStatus("success");
 
@@ -445,7 +457,7 @@ const VerifyOtp = ({ step = 2, totalSteps = 3 }) => {
             {/* Footer */}
             <footer className="w-full py-5 sm:py-6">
                 <p className="text-xs sm:text-sm text-center" style={{ color: theme.colors.text.light }}>
-                    © 2026 TrueMindPath. All rights reserved.
+                    © 2026 CareerFront. All rights reserved.
                 </p>
             </footer>
         </div>
