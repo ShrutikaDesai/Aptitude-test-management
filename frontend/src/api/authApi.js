@@ -99,20 +99,20 @@ export const verifyOtpApi = async (payload) => {
 // ================= FORGOT PASSWORD =================
 
 export const forgotPasswordApi = async (payload) => {
-  const response = await axiosInstance.post("/auth/forgot-password/", payload);
+  const response = await axiosInstance.post("/auth/students/forgot-password/", payload);
   return response.data;
 };
 
 // ================= VERIFY RESET OTP =================
 
 export const verifyResetOtpApi = async (payload) => {
-  const response = await axiosInstance.post("/auth/verify-reset-otp/", payload);
+  const response = await axiosInstance.post("/auth/students/verify-password-otp/", payload);
   return response.data;
 };
 
 // ================= RESET PASSWORD =================
 
 export const resetPasswordApi = async (payload) => {
-  const response = await axiosInstance.post("/auth/reset-password/", payload);
+  const response = await axiosInstance.post("/auth/students/reset-password/", payload);
   return response.data;
 };

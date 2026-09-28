@@ -73,7 +73,7 @@ const ResetPassword = ({ email, onSuccess }) => {
             await dispatch(
                 resetPassword({
                     email,
-                    new_password: form.password,
+                    password: form.password,
                     confirm_password: form.confirmPassword,
                 })
             ).unwrap();

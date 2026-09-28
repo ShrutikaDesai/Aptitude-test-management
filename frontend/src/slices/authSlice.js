@@ -38,7 +38,6 @@ export const registerUser = createAsyncThunk(
 );
 
 // ================= VERIFY EMAIL OTP =================
-// POST /auth/student/verify-email-otp/
 
 export const verifyOtp = createAsyncThunk(
   "auth/verifyOtp",
@@ -55,7 +54,6 @@ export const verifyOtp = createAsyncThunk(
 );
 
 // ================= SEND / RESEND EMAIL OTP =================
-// POST /auth/student/send-email-otp/
 
 export const resendOtp = createAsyncThunk(
   "auth/resendOtp",
@@ -120,6 +118,8 @@ const authSlice = createSlice({
 
   initialState: {
     user: null,
+    student: null,
+    role: null,
     accessToken: null,
     refreshToken: null,
     loading: false,
@@ -133,6 +133,8 @@ const authSlice = createSlice({
       localStorage.clear();
 
       state.user = null;
+      state.student = null;
+      state.role = null;
       state.accessToken = null;
       state.refreshToken = null;
     },
@@ -150,13 +152,18 @@ const authSlice = createSlice({
       .addCase(loginUser.fulfilled, (state, action) => {
         state.loading = false;
 
-        state.user = action.payload.user;
+        const { access_token, refresh_token, user, student, role } =
+          action.payload;
 
-        state.accessToken = action.payload.access;
-        state.refreshToken = action.payload.refresh;
+        state.user = user;
+        state.student = student;
+        state.role = role;
 
-        localStorage.setItem("accessToken", action.payload.access);
-        localStorage.setItem("refreshToken", action.payload.refresh);
+        state.accessToken = access_token;
+        state.refreshToken = refresh_token;
+
+        if (access_token) localStorage.setItem("accessToken", access_token);
+        if (refresh_token) localStorage.setItem("refreshToken", refresh_token);
       })
 
       .addCase(loginUser.rejected, (state, action) => {
